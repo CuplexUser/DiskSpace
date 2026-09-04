@@ -16,6 +16,9 @@ internal static class Glyphs
     /// <summary>Folder.</summary>
     public const string Folder = "";
 
+    /// <summary>Four tiles in a grid, the shape Windows uses for an application.</summary>
+    public const string Programs = "";
+
     /// <summary>Filing drawer.</summary>
     public const string Quarantine = "";
 

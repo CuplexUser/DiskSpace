@@ -1,8 +1,10 @@
-﻿using DiskSpace.App.Controls;
+using DiskSpace.App.Controls;
 using DiskSpace.App.Pages;
 using DiskSpace.App.Platform;
 using DiskSpace.App.Theme;
+using DiskSpace.Core.Caching;
 using DiskSpace.Core.Quarantine;
+using DiskSpace.Core.Settings;
 
 namespace DiskSpace.App;
 
@@ -17,6 +19,11 @@ public sealed class MainForm : Form
     // immediately and both pages agree on what is staged.
     private readonly QuarantineStore _quarantine = new();
 
+    // Likewise one cache and one settings object: a preference written on the Settings page has
+    // to be the one the Explorer page reads on its next scan.
+    private readonly TreeCache _cache = new();
+    private readonly AppSettings _settings = AppSettings.Load();
+
     public MainForm()
     {
         Text = "DiskSpace";
@@ -30,6 +37,10 @@ public sealed class MainForm : Form
         Controls.Add(_content);
         Controls.Add(_nav);
 
+        // Before RegisterPages, which builds the opening page: a page constructed against
+        // default settings would show them, and then write them back on its first change.
+        ApplySettings();
+
         // Subscribe before registering: RegisterPages selects the first item, and that
         // selection is what puts the opening page on screen.
         _nav.SelectionChanged += (_, item) => ShowPage(item.Key);
@@ -39,6 +50,19 @@ public sealed class MainForm : Form
         ApplyTheme();
 
         PurgeExpiredQuarantine();
+        SweepScanCache();
+    }
+
+    private void ApplySettings()
+    {
+        _settings.ApplyTo(_quarantine.Options);
+
+        AppTheme.Preference = _settings.Theme switch
+        {
+            nameof(ThemePreference.Dark) => ThemePreference.Dark,
+            nameof(ThemePreference.Light) => ThemePreference.Light,
+            _ => ThemePreference.FollowSystem,
+        };
     }
 
     private void RegisterPages()
@@ -50,7 +74,9 @@ public sealed class MainForm : Form
             return page;
         });
 
-        Register("explorer", "Explorer", Glyphs.Folder, () => new ExplorerPage());
+        Register("programs", "Programs", Glyphs.Programs, () => new ProgramsPage());
+
+        Register("explorer", "Explorer", Glyphs.Folder, () => new ExplorerPage(_cache, _settings));
 
         Register("quarantine", "Quarantine", Glyphs.Quarantine, () =>
         {
@@ -60,7 +86,8 @@ public sealed class MainForm : Form
         });
 
         Register("log", "Log", Glyphs.History, () => new LogPage());
-        Register("settings", "Settings", Glyphs.Settings, () => new SettingsPage(_quarantine));
+        Register("settings", "Settings", Glyphs.Settings, () =>
+            new SettingsPage(_quarantine, _settings, _cache));
 
         _nav.SelectFirst();
     }
@@ -110,6 +137,22 @@ public sealed class MainForm : Form
 
         UpdateQuarantineBadge();
     }
+
+    /// <summary>
+    /// Drops expired and over-cap cached trees. Off the UI thread because it deletes files, and
+    /// nothing on screen is waiting for it.
+    /// </summary>
+    private void SweepScanCache() => Task.Run(() =>
+    {
+        try
+        {
+            _cache.Sweep();
+        }
+        catch (Exception)
+        {
+            // A cache is disposable; failing to tidy it is not worth reporting.
+        }
+    });
 
     private void UpdateQuarantineBadge()
     {

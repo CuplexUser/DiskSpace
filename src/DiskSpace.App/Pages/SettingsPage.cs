@@ -1,8 +1,10 @@
 using System.IO.Compression;
 using DiskSpace.App.Controls;
 using DiskSpace.App.Theme;
+using DiskSpace.Core.Caching;
 using DiskSpace.Core.Model;
 using DiskSpace.Core.Quarantine;
+using DiskSpace.Core.Settings;
 
 namespace DiskSpace.App.Pages;
 
@@ -13,6 +15,8 @@ namespace DiskSpace.App.Pages;
 public sealed class SettingsPage : PageBase
 {
     private readonly QuarantineStore _store;
+    private readonly AppSettings _settings;
+    private readonly TreeCache _cache;
     private readonly ComboBox _themeBox = new();
     private readonly ComboBox _modeBox = new();
     private readonly ComboBox _compressionBox = new();
@@ -20,11 +24,17 @@ public sealed class SettingsPage : PageBase
     private readonly TextBox _location = new();
     private readonly AccentButton _browse = new();
     private readonly Label _locationNote = new();
+    private readonly CheckBox _useCache = new();
+    private readonly CheckBox _trustUnchanged = new();
+    private readonly AccentButton _clearCache = new();
+    private readonly Label _cacheNote = new();
 
-    public SettingsPage(QuarantineStore store)
-        : base("Settings", "How quarantine behaves, and which theme the window follows.")
+    public SettingsPage(QuarantineStore store, AppSettings settings, TreeCache cache)
+        : base("Settings", "How scanning and quarantine behave, and which theme the window follows.")
     {
         _store = store;
+        _settings = settings;
+        _cache = cache;
 
         BuildControls();
         LoadValues();
@@ -47,6 +57,46 @@ public sealed class SettingsPage : PageBase
         AddLabel("Appearance", heading: true);
         _themeBox.Items.AddRange(["Follow Windows", "Always dark", "Always light"]);
         AddField("Theme", _themeBox, "The window re-themes immediately when Windows changes.");
+
+        AddLabel("Scanning", heading: true);
+
+        _useCache.Text = "Show the last measurement while re-measuring";
+        _useCache.AutoSize = false;
+        _useCache.Width = 430;
+        _useCache.Height = 22;
+        AddField(
+            "Scan cache",
+            _useCache,
+            "A folder scanned before appears at once, marked as an estimate, and settles into "
+            + "measured numbers as the scan confirms them.");
+
+        _trustUnchanged.Text = "Trust folders whose timestamp has not changed";
+        _trustUnchanged.AutoSize = false;
+        _trustUnchanged.Width = 430;
+        _trustUnchanged.Height = 22;
+        AddField(
+            "Fast re-scan",
+            _trustUnchanged,
+            "Faster, and it will report a file that grew in place at its old size. Windows does "
+            + "not move a folder's timestamp when a file inside it is written to.");
+
+        _clearCache.Text = "Clear cache";
+        _clearCache.Kind = ButtonKind.Secondary;
+        _clearCache.Width = 108;
+        _clearCache.Location = new Point(Gutter + 200, _row);
+        _clearCache.Click += (_, _) =>
+        {
+            _cache.Clear();
+            UpdateCacheNote();
+        };
+
+        _cacheNote.AutoSize = false;
+        _cacheNote.Bounds = new Rectangle(Gutter + 320, _row + 4, 460, 22);
+        _cacheNote.Font = AppTheme.UiFontSmall;
+        _cacheNote.Tag = "note";
+
+        Body.Controls.AddRange([_clearCache, _cacheNote]);
+        _row += 44;
 
         AddLabel("Quarantine", heading: true);
 
@@ -89,6 +139,8 @@ public sealed class SettingsPage : PageBase
         Body.Controls.Add(_locationNote);
 
         _themeBox.SelectedIndexChanged += (_, _) => ApplyThemePreference();
+        _useCache.CheckedChanged += (_, _) => Save();
+        _trustUnchanged.CheckedChanged += (_, _) => Save();
         _modeBox.SelectedIndexChanged += (_, _) => Save();
         _compressionBox.SelectedIndexChanged += (_, _) => Save();
         _retention.ValueChanged += (_, _) => Save();
@@ -165,6 +217,11 @@ public sealed class SettingsPage : PageBase
             _ => 0,
         };
 
+        _useCache.Checked = _settings.UseScanCache;
+        _trustUnchanged.Checked = _settings.TrustUnchangedFolders;
+        _trustUnchanged.Enabled = _settings.UseScanCache;
+        UpdateCacheNote();
+
         var options = _store.Options;
         _modeBox.SelectedIndex = options.Mode == QuarantineMode.MoveOnSameVolume ? 1 : 0;
         _retention.Value = Math.Clamp((int)options.Retention.TotalDays, 1, 365);
@@ -187,12 +244,32 @@ public sealed class SettingsPage : PageBase
             2 => ThemePreference.Light,
             _ => ThemePreference.FollowSystem,
         };
+
+        Save();
     }
 
+    private void UpdateCacheNote()
+    {
+        var bytes = _cache.TotalBytes();
+
+        _cacheNote.Text = bytes == 0
+            ? "Nothing cached."
+            : $"{ByteSize.Format(bytes)} of remembered measurements.";
+    }
+
+    /// <summary>
+    /// Writes every setting through to disk. Until this existed, everything on this page reset
+    /// on the next launch, which made a preference something the user had to set again each time.
+    /// </summary>
     private void Save()
     {
         if (_loading)
             return;
+
+        _settings.Theme = AppTheme.Preference.ToString();
+        _settings.UseScanCache = _useCache.Checked;
+        _settings.TrustUnchangedFolders = _trustUnchanged.Checked;
+        _trustUnchanged.Enabled = _useCache.Checked;
 
         var options = _store.Options;
 
@@ -210,6 +287,9 @@ public sealed class SettingsPage : PageBase
         };
 
         options.Location = string.IsNullOrWhiteSpace(_location.Text) ? null : _location.Text.Trim();
+
+        _settings.CaptureFrom(options);
+        _settings.Save();
 
         UpdateLocationNote();
     }
@@ -286,6 +366,9 @@ public sealed class SettingsPage : PageBase
             box.ForeColor = palette.Text;
         }
 
+        _cacheNote.ForeColor = palette.TextFaint;
+
         UpdateLocationNote();
+        UpdateCacheNote();
     }
 }

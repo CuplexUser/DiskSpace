@@ -1,39 +1,26 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.IO.Enumeration;
 
 namespace DiskSpace.Core.Scanning;
 
 /// <summary>
-/// Recursive directory sizer built on <see cref="FileSystemEnumerable{TResult}"/>.
+/// Recursive directory sizer that measures a whole tree and returns once, which is what the rule
+/// catalog wants: it needs one number per target before it can decide anything.
 ///
-/// The transform reads Length, Attributes and LastWriteTime straight off the
-/// <see cref="FileSystemEntry"/> struct, so walking a profile with a million files allocates
-/// no <c>FileInfo</c> objects. Recursion is driven level by level rather than by
-/// <c>RecurseSubdirectories</c>, which keeps parallelism, cancellation and reparse-point
-/// skipping under our own control.
+/// Recursion is driven level by level rather than by <c>RecurseSubdirectories</c>, which keeps
+/// parallelism, cancellation and reparse-point skipping under our own control. Totals are filled
+/// in by a single post-order <see cref="RollUp"/> at the end.
+///
+/// The Explorer page uses <see cref="ProgressiveScanner"/> instead, which accumulates totals as
+/// it goes so a tree can be shown while it is still being measured. Both share
+/// <see cref="DirectoryReader"/>, so there is still exactly one set of rules about junctions,
+/// hidden files and access denials. Keeping the two aggregation strategies separate is
+/// deliberate: it makes the "both scanners agree" test a real comparison rather than a
+/// tautology, and that test guards the numbers a deletion is planned from.
 /// </summary>
 public sealed class FastDirectoryScanner(ScanOptions? options = null)
 {
     private readonly ScanOptions _options = options ?? new ScanOptions();
-
-    private static readonly EnumerationOptions EnumOptions = new()
-    {
-        RecurseSubdirectories = false,
-        // Deliberately false: an unreadable directory should become a recorded issue,
-        // not vanish silently and quietly understate the total.
-        IgnoreInaccessible = false,
-        // Hidden and system files occupy disk like any other.
-        AttributesToSkip = 0,
-        ReturnSpecialDirectories = false,
-    };
-
-    private readonly record struct RawEntry(
-        string Name,
-        long Length,
-        bool IsDirectory,
-        bool IsReparsePoint,
-        DateTime LastWriteUtc);
 
     private sealed class Counters
     {
@@ -71,9 +58,9 @@ public sealed class FastDirectoryScanner(ScanOptions? options = null)
             cancellationToken.ThrowIfCancellationRequested();
             var nextLevel = new ConcurrentBag<DirectoryNode>();
 
-            await Parallel.ForEachAsync(currentLevel, parallelOptions, (node, _) =>
+            await Parallel.ForEachAsync(currentLevel, parallelOptions, (node, token) =>
             {
-                ScanOneDirectory(node, nextLevel, issues, counters, progress);
+                ScanOneDirectory(node, nextLevel, issues, counters, progress, token);
                 return ValueTask.CompletedTask;
             }).ConfigureAwait(false);
 
@@ -99,72 +86,37 @@ public sealed class FastDirectoryScanner(ScanOptions? options = null)
         ConcurrentBag<DirectoryNode> nextLevel,
         ConcurrentBag<ScanIssue> issues,
         Counters counters,
-        IProgress<ScanProgress>? progress)
+        IProgress<ScanProgress>? progress,
+        CancellationToken cancellationToken)
     {
-        long ownSize = 0;
-        var ownFiles = 0;
-        var lastWrite = DateTime.MinValue;
+        var reading = DirectoryReader.Read(node, _options, cancellationToken);
 
-        try
+        node.SetChildren(reading.Children);
+        node.SetFlag(NodeFlags.Enumerated);
+
+        if (!reading.Vanished)
         {
-            var entries = new FileSystemEnumerable<RawEntry>(
-                node.Path,
-                static (ref FileSystemEntry entry) => new RawEntry(
-                    entry.IsDirectory ? entry.FileName.ToString() : string.Empty,
-                    entry.IsDirectory ? 0L : entry.Length,
-                    entry.IsDirectory,
-                    (entry.Attributes & FileAttributes.ReparsePoint) != 0,
-                    entry.LastWriteTimeUtc.UtcDateTime),
-                EnumOptions);
+            node.SetOwn(reading.OwnSize, reading.OwnFileCount);
+            node.RaiseLastWrite(reading.NewestEntryUtc);
+            node.Error = reading.Error;
 
-            foreach (var entry in entries)
+            if (reading.IssueReason is { } reason)
+                issues.Add(new ScanIssue(reading.Path, reason));
+
+            foreach (var child in reading.Children)
             {
-                if (entry.LastWriteUtc > lastWrite)
-                    lastWrite = entry.LastWriteUtc;
-
-                if (!entry.IsDirectory)
-                {
-                    ownSize += entry.Length;
-                    ownFiles++;
-                    continue;
-                }
-
-                var childPath = Path.Combine(node.Path, entry.Name);
-                if (_options.ExcludedPaths.Contains(childPath))
-                    continue;
-
-                var child = new DirectoryNode(childPath, node)
-                {
-                    IsReparsePoint = entry.IsReparsePoint,
-                    LastWriteUtc = entry.LastWriteUtc,
-                };
-                node.Children.Add(child);
-
                 // A junction contributes no bytes of its own; following it would double-count
                 // at best and loop forever at worst.
-                if (entry.IsReparsePoint && !_options.FollowReparsePoints)
-                    continue;
-
-                nextLevel.Add(child);
+                if (DirectoryReader.ShouldDescend(child, _options))
+                    nextLevel.Add(child);
+                else
+                    child.SetFlag(NodeFlags.Enumerated);
             }
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException
-                                     or DirectoryNotFoundException
-                                     or IOException
-                                     or System.Security.SecurityException)
-        {
-            node.Error = ex.Message;
-            issues.Add(new ScanIssue(node.Path, Describe(ex)));
-        }
-
-        node.OwnSize = ownSize;
-        node.OwnFileCount = ownFiles;
-        if (lastWrite > node.LastWriteUtc)
-            node.LastWriteUtc = lastWrite;
 
         var scanned = Interlocked.Increment(ref counters.Directories);
-        Interlocked.Add(ref counters.Files, ownFiles);
-        Interlocked.Add(ref counters.Bytes, ownSize);
+        Interlocked.Add(ref counters.Files, reading.OwnFileCount);
+        Interlocked.Add(ref counters.Bytes, reading.OwnSize);
 
         if (progress is not null && scanned % _options.ProgressInterval == 0)
         {
@@ -172,17 +124,9 @@ public sealed class FastDirectoryScanner(ScanOptions? options = null)
                 scanned,
                 Interlocked.Read(ref counters.Files),
                 Interlocked.Read(ref counters.Bytes),
-                node.Path));
+                reading.Path));
         }
     }
-
-    private static string Describe(Exception ex) => ex switch
-    {
-        UnauthorizedAccessException => "Access denied",
-        DirectoryNotFoundException => "Removed during scan",
-        PathTooLongException => "Path too long",
-        _ => ex.Message,
-    };
 
     /// <summary>
     /// Post-order roll-up over an explicit stack. A recursive version stack-overflows on the
@@ -214,13 +158,15 @@ public sealed class FastDirectoryScanner(ScanOptions? options = null)
                 size += child.TotalSize;
                 files += child.TotalFileCount;
                 dirs += child.TotalDirectoryCount + 1;
-                if (child.LastWriteUtc > node.LastWriteUtc)
-                    node.LastWriteUtc = child.LastWriteUtc;
+                node.RaiseLastWrite(child.LastWriteUtc);
             }
 
-            node.TotalSize = size;
-            node.TotalFileCount = files;
-            node.TotalDirectoryCount = dirs;
+            node.SetTotals(size, files, dirs);
+
+            // A rolled-up tree is fully known, so every node in it reports as listed and
+            // settled. Without this the tree view would draw an expander on a leaf.
+            node.SetFlag(NodeFlags.Enumerated);
+            node.MarkComplete();
         }
     }
 }

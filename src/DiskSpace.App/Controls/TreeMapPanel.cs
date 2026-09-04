@@ -27,6 +27,14 @@ public sealed class TreeMapPanel : ThemedControl
     private sealed record Cell(DirectoryNode? Node, RectangleF Bounds, Color Fill, string Label, long Size);
 
     private readonly List<Cell> _cells = [];
+
+    /// <summary>
+    /// Which series color each child was given. Colors are assigned by rank, and under a live
+    /// scan the ranks churn, so recomputing them every second makes the map strobe. Remembering
+    /// the first assignment lets a cell keep its identity while it grows.
+    /// </summary>
+    private readonly Dictionary<DirectoryNode, int> _slots = [];
+
     private DirectoryNode? _current;
     private Cell? _hover;
     private ToolTip? _toolTip;
@@ -47,7 +55,21 @@ public sealed class TreeMapPanel : ThemedControl
 
     public void Show(DirectoryNode? directory)
     {
+        if (!ReferenceEquals(directory, _current))
+            _slots.Clear();
+
         _current = directory;
+        _hover = null;
+        Rebuild();
+        Invalidate();
+    }
+
+    /// <summary>Re-lays the current directory against values a running scan has moved on.</summary>
+    public void RefreshValues()
+    {
+        if (_current is null)
+            return;
+
         _hover = null;
         Rebuild();
         Invalidate();
@@ -89,11 +111,10 @@ public sealed class TreeMapPanel : ThemedControl
         items.Sort((a, b) => b.Size.CompareTo(a.Size));
 
         var colors = new Color[items.Count];
-        var slot = 0;
         for (var i = 0; i < items.Count; i++)
         {
-            colors[i] = items[i].Node is not null && slot < MaxSeries
-                ? palette.Series[slot++]
+            colors[i] = items[i].Node is { } node && SlotFor(node) is { } slot
+                ? palette.Series[slot]
                 : palette.SeriesOther;
         }
 
@@ -106,6 +127,30 @@ public sealed class TreeMapPanel : ThemedControl
             var item = items[index];
             _cells.Add(new Cell(item.Node, rect, colors[index], item.Label, item.Size));
         }
+    }
+
+    /// <summary>
+    /// The series slot this child holds, assigning the lowest free one the first time it is
+    /// seen. Null once all of them are taken, which sends the child to the neutral color.
+    /// </summary>
+    private int? SlotFor(DirectoryNode node)
+    {
+        if (_slots.TryGetValue(node, out var existing))
+            return existing;
+
+        if (_slots.Count >= MaxSeries)
+            return null;
+
+        for (var slot = 0; slot < MaxSeries; slot++)
+        {
+            if (!_slots.ContainsValue(slot))
+            {
+                _slots[node] = slot;
+                return slot;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
