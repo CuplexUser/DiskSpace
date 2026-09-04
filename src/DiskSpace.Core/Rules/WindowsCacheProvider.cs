@@ -85,7 +85,7 @@ public sealed class WindowsCacheProvider : IRuleProvider
             Risk = RiskLevel.Safe,
             Description = "Memory dumps written when an application crashed.",
             WhatBreaks =
-                "Nothing, unless you are actively debugging one of these crashes — a dump "
+                "Nothing, unless you are actively debugging one of these crashes. A dump "
                 + "cannot be regenerated after the fact.",
             Root = Path.Combine(local, "CrashDumps"),
             Targets = [Path.Combine(local, "CrashDumps")],

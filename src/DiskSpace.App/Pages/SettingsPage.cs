@@ -228,7 +228,7 @@ public sealed class SettingsPage : PageBase
             if (string.Equals(root, profileRoot, StringComparison.OrdinalIgnoreCase))
             {
                 _locationNote.Text =
-                    $"This location is on {root} — the same volume as your profile, so archiving "
+                    $"This location is on {root}, the same volume as your profile, so archiving "
                     + "there will not free space until items are purged.";
                 _locationNote.ForeColor = palette.RiskReview;
                 return;

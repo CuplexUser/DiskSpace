@@ -1,4 +1,4 @@
-using System.Drawing.Text;
+﻿using System.Drawing.Text;
 using DiskSpace.App.Controls;
 using DiskSpace.App.Platform;
 using DiskSpace.App.Theme;
@@ -30,10 +30,14 @@ public sealed class CleanupConfirmDialog : Form
         _plan = plan;
 
         Text = "Confirm cleanup";
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        // FixedSingle rather than FixedDialog: a dialog-style frame refuses to draw a title
+        // bar icon at all, so the window would stay anonymous however Icon was set.
+        FormBorderStyle = FormBorderStyle.FixedSingle;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
+        ShowIcon = true;
+        AppIcon.Apply(this);
         ClientSize = new Size(720, 560);
         Font = AppTheme.UiFont;
         DoubleBuffered = true;
@@ -58,7 +62,7 @@ public sealed class CleanupConfirmDialog : Form
         foreach (var group in _plan.ByCategory.OrderByDescending(g => g.Sum(i => i.Size)))
         {
             _paths.Items.Add(new PathRow(
-                $"{group.Key}  —  {ByteSize.Format(group.Sum(i => i.Size))}", IsHeading: true, RiskLevel.Safe));
+                $"{group.Key}:  {ByteSize.Format(group.Sum(i => i.Size))}", IsHeading: true, RiskLevel.Safe));
 
             foreach (var item in group.OrderByDescending(i => i.Size))
             {
@@ -87,14 +91,27 @@ public sealed class CleanupConfirmDialog : Form
         _confirmBox.TextChanged += (_, _) => UpdateConfirmState();
         _confirmBox.Visible = _plan.NeedsExplicitConfirmation;
 
+        // Both buttons are placed from the right edge in one calculation, and Cancel is
+        // positioned off Confirm rather than off its own guess at the edge. Two independent
+        // offsets are what let these overlap in the first place.
+        const int Margin = 18;
+        const int Gap = 10;
+        const int ButtonTop = 34;
+        const int ButtonHeight = 30;
+        const int ConfirmWidth = 104;
+        const int CancelWidth = 92;
+
+        var confirmLeft = ClientSize.Width - Margin - ConfirmWidth;
+        var cancelLeft = confirmLeft - Gap - CancelWidth;
+
         _cancelButton.Text = "Cancel";
-        _cancelButton.Width = 92;
-        _cancelButton.Bounds = new Rectangle(ClientSize.Width - 212, 34, 92, 30);
+        _cancelButton.Bounds = new Rectangle(cancelLeft, ButtonTop, CancelWidth, ButtonHeight);
+        _cancelButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _cancelButton.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
 
         _confirmButton.Kind = ButtonKind.Danger;
-        _confirmButton.Width = 104;
-        _confirmButton.Bounds = new Rectangle(ClientSize.Width - 110 - 18, 34, 104, 30);
+        _confirmButton.Bounds = new Rectangle(confirmLeft, ButtonTop, ConfirmWidth, ButtonHeight);
+        _confirmButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _confirmButton.Click += (_, _) => { DialogResult = DialogResult.OK; Close(); };
 
         footer.Controls.AddRange([_prompt, _confirmBox, _cancelButton, _confirmButton]);
@@ -152,7 +169,7 @@ public sealed class CleanupConfirmDialog : Form
 
         _prompt.Text = _plan.ContainsQuarantine
             ? $"This selection includes items that are not simple caches. Type {ConfirmWord} to continue."
-            : $"Deletion is permanent — there is no Recycle Bin. Type {ConfirmWord} to continue.";
+            : $"Deletion is permanent. There is no Recycle Bin. Type {ConfirmWord} to continue.";
         _prompt.ForeColor = palette.RiskReview;
 
         _confirmButton.Text = "Delete";

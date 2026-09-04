@@ -179,7 +179,7 @@ public sealed class PathGuard
             return GuardVerdict.Deny("System Volume Information");
 
         if (_protectedExact.Contains(canonical.TrimEnd(Path.DirectorySeparatorChar)))
-            return GuardVerdict.Deny("Protected directory — may be cleaned inside, never removed");
+            return GuardVerdict.Deny("Protected directory: may be cleaned inside, never removed");
 
         foreach (var tree in _protectedTrees)
         {

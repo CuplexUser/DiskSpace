@@ -60,8 +60,8 @@ public sealed class PackageManagerCacheProvider : IRuleProvider
         yield return Cache(
             "nuget", "NuGet packages", Path.Combine(profile, ".nuget", "packages"),
             "Extracted NuGet packages shared by every .NET project on this machine.",
-            "Nothing permanent, but every .NET project on this machine restores from here — "
-            + "the next build of each will re-download its dependencies.",
+            "Nothing permanent, but every .NET project on this machine restores from here, "
+            + "so the next build of each will re-download its dependencies.",
             new PurgeCommand("dotnet", "nuget locals all --clear"));
 
         yield return Cache(
@@ -99,7 +99,7 @@ public sealed class PackageManagerCacheProvider : IRuleProvider
             "maven", "Maven repository", Path.Combine(profile, ".m2", "repository"),
             "Downloaded Maven artifacts.",
             "Nothing, unless you have artifacts installed locally that are not in any remote "
-            + "repository — those would need rebuilding.",
+            + "repository. Those would need rebuilding.",
             risk: RiskLevel.Review);
 
         yield return Cache(

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using DiskSpace.Core.Model;
 using DiskSpace.Core.Quarantine;
 using DiskSpace.Core.Rules;
@@ -54,12 +54,44 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null)
 
         using var log = AuditLog.StartRun();
 
+        // Archiving one large folder is a single plan item that can run for minutes. Without
+        // this the bar would sit still through the slowest part of a run, so the quarantine
+        // store's file-level progress is forwarded as detail on the item currently in hand.
+        // Throttled, because a folder can hold a hundred thousand files and each one would
+        // otherwise cost a marshalled call to the UI thread.
+        var lastDetailAt = 0L;
+
+        IProgress<QuarantineProgress>? ItemDetail(PlannedItem item)
+        {
+            if (progress is null)
+                return null;
+
+            return new Progress<QuarantineProgress>(archive =>
+            {
+                var now = Stopwatch.GetTimestamp();
+                var isLast = archive.FilesDone >= archive.FilesTotal;
+
+                if (!isLast && Stopwatch.GetElapsedTime(lastDetailAt, now) < TimeSpan.FromMilliseconds(120))
+                    return;
+
+                lastDetailAt = now;
+
+                progress.Report(new CleanupProgress(
+                    completed,
+                    plan.Items.Count,
+                    reclaimed,
+                    item.Path,
+                    $"archiving {archive.FilesDone:N0} of {archive.FilesTotal:N0} files"));
+            });
+        }
+
         foreach (var item in plan.Items)
         {
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new CleanupProgress(completed, plan.Items.Count, reclaimed, item.Path));
 
-            var outcome = await DisposeItemAsync(item, cancellationToken).ConfigureAwait(false);
+            var outcome = await DisposeItemAsync(item, ItemDetail(item), cancellationToken)
+                .ConfigureAwait(false);
             outcomes.Add(outcome);
 
             if (outcome.Succeeded)
@@ -89,7 +121,9 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null)
     }
 
     private async Task<CleanupOutcome> DisposeItemAsync(
-        PlannedItem item, CancellationToken cancellationToken)
+        PlannedItem item,
+        IProgress<QuarantineProgress>? archiveProgress,
+        CancellationToken cancellationToken)
     {
         // Re-validated here, not trusted from planning time. Between preview and execution the
         // filesystem can change underneath us, and this is the only check that matters.
@@ -111,7 +145,7 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null)
             if (item.Disposal == Disposal.Quarantine)
             {
                 var manifest = await _quarantine
-                    .QuarantineAsync(item.Path, item.Rule, null, cancellationToken)
+                    .QuarantineAsync(item.Path, item.Rule, archiveProgress, cancellationToken)
                     .ConfigureAwait(false);
 
                 return new CleanupOutcome

@@ -9,16 +9,17 @@
     <RootNamespace>DiskSpace.App</RootNamespace>
     <AssemblyName>DiskSpace</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Gives the executable, its shortcuts and the installer their icon. -->
+    <ApplicationIcon>Assets\DiskSpace.ico</ApplicationIcon>
     <!-- The window is laid out by code, not the designer; ApplicationConfiguration.Initialize
          would only re-apply DPI and visual-style settings Program.Main already sets. -->
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <!-- Required by the LibraryImport source generator used in Platform/. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Product>DiskSpace</Product>
     <AssemblyTitle>DiskSpace</AssemblyTitle>
     <Description>Disk reclamation for Windows</Description>
-    <Version>0.1.0</Version>
+    <!-- Version, Product, Company and Copyright come from Directory.Build.props. -->
   </PropertyGroup>
 
   <!-- Build with -p:DevNoElevation=true to run unelevated during development, so a debug
@@ -26,6 +27,12 @@
   <PropertyGroup Condition="'$(DevNoElevation)' == 'true'">
     <ApplicationManifest>app.dev.manifest</ApplicationManifest>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Embedded as well as compiled into the executable's resources: AppIcon loads it from
+         here so every window gets the icon at every size it is asked for. -->
+    <EmbeddedResource Include="Assets\DiskSpace.ico" LogicalName="DiskSpace.App.Assets.DiskSpace.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DiskSpace.Core\DiskSpace.Core.csproj" />

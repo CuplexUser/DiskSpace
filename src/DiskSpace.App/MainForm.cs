@@ -1,4 +1,4 @@
-using DiskSpace.App.Controls;
+﻿using DiskSpace.App.Controls;
 using DiskSpace.App.Pages;
 using DiskSpace.App.Platform;
 using DiskSpace.App.Theme;
@@ -20,6 +20,7 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "DiskSpace";
+        AppIcon.Apply(this);
         MinimumSize = new Size(1040, 660);
         Size = new Size(1320, 820);
         StartPosition = FormStartPosition.CenterScreen;

@@ -82,10 +82,10 @@ public sealed class FindingDetailPane : ThemedControl
 
         var (label, color) = finding.Rule.Risk switch
         {
-            RiskLevel.Safe => ("Safe — regenerates on demand", palette.RiskSafe),
-            RiskLevel.Review => ("Review — quarantined, restorable", palette.RiskReview),
-            RiskLevel.Advanced => ("Advanced — affects system state", palette.RiskAdvanced),
-            _ => ("Information only — not removed", palette.RiskReport),
+            RiskLevel.Safe => ("Safe: regenerates on demand", palette.RiskSafe),
+            RiskLevel.Review => ("Review: quarantined, restorable", palette.RiskReview),
+            RiskLevel.Advanced => ("Advanced: affects system state", palette.RiskAdvanced),
+            _ => ("Information only: not removed", palette.RiskReport),
         };
 
         using (var dot = new SolidBrush(color))

@@ -1,4 +1,4 @@
-using DiskSpace.App.Controls;
+﻿using DiskSpace.App.Controls;
 using DiskSpace.App.Dialogs;
 using DiskSpace.App.Theme;
 using DiskSpace.Core.Cleaning;
@@ -21,6 +21,7 @@ public sealed class ScanPage : PageBase
     private readonly AccentButton _cleanButton = new();
     private readonly Label _status = new();
     private readonly Label _selectionSummary = new();
+    private readonly ProgressStrip _progress = new();
 
     private readonly QuarantineStore _quarantine;
     private CancellationTokenSource? _cancellation;
@@ -69,10 +70,16 @@ public sealed class ScanPage : PageBase
         _status.TextAlign = ContentAlignment.MiddleLeft;
         _status.Font = AppTheme.UiFont;
         _status.Padding = new Padding(Gutter, 0, Gutter, 0);
-        _status.Text = "Ready. Scanning only measures — nothing is removed until you say so.";
+        _status.Text = "Ready. Scanning only measures. Nothing is removed until you say so.";
 
-        var statusBar = new Panel { Dock = DockStyle.Bottom, Height = 30 };
+        _progress.Dock = DockStyle.Top;
+        _progress.Visible = false;
+
+        // The label fills what the strip leaves, so it is added first: docking is applied in
+        // reverse of the order controls go in.
+        var statusBar = new Panel { Dock = DockStyle.Bottom, Height = 34 };
         statusBar.Controls.Add(_status);
+        statusBar.Controls.Add(_progress);
 
         Body.Controls.Add(_split);
         Body.Controls.Add(statusBar);
@@ -130,8 +137,13 @@ public sealed class ScanPage : PageBase
         _cancellation = new CancellationTokenSource();
         SetBusy(true, "Cancel");
 
+        _progress.Start();
+
         var progress = new Progress<RuleProgress>(p =>
-            _status.Text = $"Measuring {p.Completed}/{p.Total} — {p.CurrentRule}");
+        {
+            _progress.Report(p.Completed, p.Total);
+            _status.Text = $"Measuring {p.Completed}/{p.Total} · {p.CurrentRule}";
+        });
 
         try
         {
@@ -181,9 +193,15 @@ public sealed class ScanPage : PageBase
         SetBusy(true, "Scan");
         _cleanButton.Enabled = false;
 
+        _progress.Start();
+
         var progress = new Progress<CleanupProgress>(p =>
+        {
+            _progress.Report(p.Completed, p.Total);
             _status.Text =
-                $"Cleaning {p.Completed}/{p.Total} · {ByteSize.Format(p.BytesReclaimed)} reclaimed");
+                $"Cleaning {p.Completed}/{p.Total} · {DescribeWork(p)} · "
+                + $"{ByteSize.Format(p.BytesReclaimed)} reclaimed";
+        });
 
         try
         {
@@ -193,7 +211,7 @@ public sealed class ScanPage : PageBase
                 ? $"Reclaimed {ByteSize.Format(report.BytesReclaimed)} from {report.SucceededCount} items "
                   + $"in {report.Duration.TotalSeconds:N1}s."
                 : $"Reclaimed {ByteSize.Format(report.BytesReclaimed)}; {report.FailedCount} item(s) could "
-                  + $"not be removed — {DescribeFirstFailure(report)}";
+                  + $"not be removed: {DescribeFirstFailure(report)}";
 
             _status.ForeColor = report.FailedCount == 0
                 ? AppTheme.Current.RiskSafe
@@ -225,6 +243,26 @@ public sealed class ScanPage : PageBase
         }
     }
 
+    /// <summary>
+    /// What the run is doing right now: the file-level detail when there is one, otherwise the
+    /// item being worked on. Naming it matters more than the count does, because one item can
+    /// occupy the whole run.
+    /// </summary>
+    private static string DescribeWork(CleanupProgress progress)
+    {
+        if (progress.Detail is { Length: > 0 } detail)
+            return detail;
+
+        return progress.CurrentPath == "Done" ? "finishing" : Shorten(progress.CurrentPath);
+    }
+
+    /// <summary>Last two segments of a path, which is enough to recognise it.</summary>
+    private static string Shorten(string path)
+    {
+        var segments = path.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length <= 2 ? path : Path.Combine("...", segments[^2], segments[^1]);
+    }
+
     private static string DescribeFirstFailure(CleanupReport report)
     {
         var failure = report.Failures.First();
@@ -235,6 +273,9 @@ public sealed class ScanPage : PageBase
 
     private void SetBusy(bool busy, string scanLabel)
     {
+        if (!busy)
+            _progress.Stop();
+
         _scanButton.Text = busy ? "Cancel" : scanLabel;
         _scanButton.Kind = busy ? ButtonKind.Danger : ButtonKind.Primary;
         _cleanButton.Enabled = !busy && _tree.Selected.Count > 0;

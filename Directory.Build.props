@@ -1,5 +1,31 @@
 <Project>
 
+  <!--
+    The version lives here and nowhere else. The assembly, the installer filename, the
+    Add/Remove Programs entry and the upgrade comparison all derive from VersionPrefix,
+    so they cannot drift apart. Bump it here, or with `./build.ps1 Version -SetVersion x.y.z`.
+
+    VersionPrefix    0.1.0      the released version
+    VersionSuffix    beta.1     optional pre-release label, empty for a release
+    AssemblyVersion  0.1.0.0    major.minor.patch.0, what the CLR binds against
+    FileVersion      0.1.0.0    what Windows shows in file properties
+    InformationalVersion        0.1.0+<git sha>, stamped below
+  -->
+  <PropertyGroup Label="Version">
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix></VersionSuffix>
+    <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).0</FileVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Metadata">
+    <Product>DiskSpace</Product>
+    <Company>Martin Dahl</Company>
+    <Authors>Martin Dahl</Authors>
+    <Copyright>Copyright 2026 Martin Dahl</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+  </PropertyGroup>
+
   <!-- Settings shared by every project. Per-project files keep only what is genuinely
        theirs: output type, framework-specific switches, and package references. -->
   <PropertyGroup>
@@ -18,5 +44,25 @@
   <PropertyGroup Condition="'$(ContinuousIntegrationBuild)' == 'true'">
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+
+  <!--
+    Stamps the commit into InformationalVersion, which the SDK builds as
+    "$(Version)+$(SourceRevisionId)". A build reported from a user's machine can then be
+    traced to an exact commit, which a three-part version alone cannot do.
+
+    Conditioned on a .git directory being present so a build from a source archive, where
+    there is no repository to ask, stays quiet instead of warning.
+  -->
+  <Target Name="StampSourceRevision"
+          BeforeTargets="GetAssemblyVersion"
+          Condition="'$(SourceRevisionId)' == '' And Exists('$(MSBuildThisFileDirectory).git')">
+    <Exec Command="git rev-parse --short HEAD"
+          ConsoleToMSBuild="true"
+          ContinueOnError="true"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="SourceRevisionId" />
+    </Exec>
+  </Target>
 
 </Project>

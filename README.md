@@ -5,25 +5,25 @@ removing it will cost you, and keeps a record of everything it removed.
 
 Two ways of looking at a full disk, in one window:
 
-- **Scan** — a catalog of things the tool knows how to reclaim: package manager caches, browser
+- **Scan**: a catalog of things the tool knows how to reclaim: package manager caches, browser
   and Electron caches, Windows' own temp and update caches, leftover data from uninstalled
   software. Every finding names its consequence in plain language before you select it.
-- **Explorer** — a fast recursive sizer with a treemap, for the other question: *what is
+- **Explorer**: a fast recursive sizer with a treemap, for the other question: *what is
   actually eating my disk?* No rules involved, so it can see what the catalog cannot.
 
 ## Why another cleaner
 
-Most disk cleaners are opaque about the only thing that matters — whether the thing they are
-about to delete matters. This one is built around that question:
+Most disk cleaners are opaque about the only thing that matters, which is whether the thing
+they are about to delete matters. This one is built around that question:
 
 - Every rule carries a **`WhatBreaks`** description, and the UI shows it next to the finding.
   "Nothing. The next install re-downloads what it needs" is a different decision from "your
   saved logins go with it."
 - **Risk levels** decide behavior, not just color. `Safe` regenerates on demand. `Review` is a
-  heuristic and is never auto-selected — findings there are quarantined rather than deleted.
+  heuristic and is never auto-selected, so findings there are quarantined rather than deleted.
   `Advanced` affects system state. `ReportOnly` is surfaced but never touched, so the disk
   arithmetic still adds up once every cache is gone.
-- Large things it refuses to delete — `hiberfil.sys`, the component store — are still listed,
+- Large things it refuses to delete (`hiberfil.sys`, the component store) are still listed,
   each with the correct way to deal with it (`powercfg /hibernate off`, not `del`).
 - Where a tool has its own purge command, that command is preferred over deleting files
   underneath it. A package manager knows its own index; we do not.
@@ -36,10 +36,10 @@ Bin. So the guard rails are in the code rather than in the process token:
 | Layer | What it does |
 | --- | --- |
 | `PathGuard` | The last check before any deletion. Protected trees (Program Files, Documents, Downloads, `.ssh`, OneDrive), a minimum path depth of four segments, and a strict allowlist for anything under `%WINDIR%`. Enforced at the deletion boundary, so no rule can opt out. |
-| `PathCanonicalizer` | Every check runs on the canonical path, not the string the caller passed — a junction inside a cache cannot walk out into the rest of the disk. |
+| `PathCanonicalizer` | Every check runs on the canonical path, not the string the caller passed, so a junction inside a cache cannot walk out into the rest of the disk. |
 | Plan / execute split | `CleanupExecutor.Plan` produces the exact list of paths; `ExecuteAsync` accepts only that object. Nothing is removed that was not first shown, and every path is re-checked immediately before it is touched. |
 | Quarantine | Orphan findings are archived, verified and closed *before* the original is removed. Restorable for the retention period (7 days by default). |
-| Audit log | JSONL, one line per item, flushed as each item goes — a crash halfway through still leaves a complete record. |
+| Audit log | JSONL, one line per item, flushed as each item goes, so a crash halfway through still leaves a complete record. |
 | Restart Manager | Turns "the file is in use by another process" into "held by Code.exe", which is something you can act on. |
 
 ## Requirements
@@ -47,7 +47,7 @@ Bin. So the guard rails are in the code rather than in the process token:
 - Windows 10 or 11
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) to build; the published single-file build
   needs only the .NET 10 desktop runtime (or nothing at all, with `-SelfContained`)
-- Administrator rights at runtime — several rules reach machine-wide caches
+- Administrator rights at runtime, because several rules reach machine-wide caches
 
 ## Build and run
 
@@ -59,6 +59,8 @@ Bin. So the guard rails are in the code rather than in the process token:
 ./build.ps1 Test -Coverage  # ...and write a Cobertura report to artifacts/coverage/
 ./build.ps1 Run             # build and launch, without a UAC prompt
 ./build.ps1 Publish         # artifacts/publish/DiskSpace.exe, one file
+./build.ps1 Installer       # artifacts/installer/DiskSpace-<version>-win-x64-setup.exe
+./build.ps1 Version         # show the resolved version
 ./build.ps1 All             # clean, build, test, publish
 ```
 
@@ -76,33 +78,86 @@ dotnet run --project src/DiskSpace.App -p:DevNoElevation=true
 ### Running during development
 
 The shipping manifest requests `requireAdministrator`, which means a UAC prompt on every
-launch. Building with `-p:DevNoElevation=true` swaps in `app.dev.manifest` instead — that is
+launch. Building with `-p:DevNoElevation=true` swaps in `app.dev.manifest` instead, which is
 what `./build.ps1 Run` does. Rules that reach machine-wide caches will report access denied in
 that mode, which is the correct behavior, not a bug. Never set it for a build you intend to
 hand to someone.
+
+## Installer
+
+`./build.ps1 Installer` publishes the app and then compiles `installer/DiskSpace.iss` with
+[Inno Setup 6](https://jrsoftware.org/isdl.php), which the script finds on PATH or in the usual
+per-user and per-machine locations. The result is a single setup executable in
+`artifacts/installer/`.
+
+What the installer does beyond copying a file:
+
+- **Upgrades in place.** A second install of the same product replaces the first: same
+  directory, same Start menu entry, same desktop-icon choice, and one entry in Add/Remove
+  Programs rather than two. The final page says which version is being replaced.
+- **Refuses to silently downgrade.** Installing an older build over a newer one asks first,
+  and in silent mode (`/SILENT`) it aborts rather than rolling back a machine unattended.
+- **Closes a running copy.** Restart Manager shuts the app down so an upgrade cannot fail on
+  a locked executable.
+- **Checks for the .NET 10 Desktop Runtime** and offers the download page if it is missing.
+  Publishing with `-SelfContained` bundles the runtime and skips the check.
+- **Leaves your data alone on uninstall.** Removing the app offers to delete the cleanup logs
+  and never touches quarantined items, which may still be the only copy of something.
+
+## Versioning
+
+The version is written down in exactly one place, `Directory.Build.props`:
+
+```xml
+<VersionPrefix>0.1.0</VersionPrefix>
+<VersionSuffix></VersionSuffix>
+```
+
+Everything else derives from it, so the assembly, the installer filename, the Add/Remove
+Programs entry and the upgrade comparison cannot disagree:
+
+| | |
+| --- | --- |
+| `AssemblyVersion` / `FileVersion` | `0.1.0.0` |
+| `InformationalVersion` | `0.1.0+<git sha>`, stamped by a target in `Directory.Build.props` |
+| Installer | `DiskSpace-0.1.0-win-x64-setup.exe` |
+
+Bump it with the build script rather than by hand, which validates the format and keeps the
+prefix and suffix consistent:
+
+```powershell
+./build.ps1 Version -SetVersion 0.2.0
+./build.ps1 Version -SetVersion 0.2.0-beta.1
+```
+
+Pre-release labels are for display only. The Windows version resource and the installer's
+upgrade check use the three-part number, so `0.2.0-beta.1` compares as `0.2.0`.
 
 ## Project layout
 
 ```
 src/
   DiskSpace.Core/          No UI. Testable on its own.
-    Scanning/              FastDirectoryScanner — parallel, allocation-light directory sizing
+    Scanning/              FastDirectoryScanner: parallel, allocation-light directory sizing
     Rules/                 Providers, the rule catalog, installed-software lookup
     Safety/                PathGuard, PathCanonicalizer, SafeDelete
     Cleaning/              CleanupExecutor, the audit log, Restart Manager interop
     Quarantine/            Archive, restore, retention
     Model/                 ByteSize, RiskLevel
-  DiskSpace.App/           WinForms, laid out in code — no designer files
+  DiskSpace.App/           WinForms, laid out in code, no designer files
     Pages/                 Scan, Explorer, Quarantine, Log, Settings
-    Controls/              Treemap, findings tree, nav rail, custom-drawn primitives
-    Theme/                 Palette, fonts, glyphs; follows the Windows light/dark setting
+    Controls/              Treemap, findings tree, nav rail, progress strip
+    Theme/                 Palette, fonts, glyphs, window icon; follows the Windows light/dark setting
+    Assets/                DiskSpace.ico, shared by the executable, its windows and the installer
 tests/
   DiskSpace.Core.Tests/    xUnit; the guard, executor, scanner and quarantine store
+installer/
+  DiskSpace.iss            Inno Setup script
 ```
 
 The rule catalog is where new cleanup knowledge goes: implement `IRuleProvider`, return
 `CleanupRule` records, and add it to `RuleCatalog.DefaultProviders`. Rules describe territory
-and intent — they never delete and never decide safety, which stays with `PathGuard`.
+and intent. They never delete and never decide safety, which stays with `PathGuard`.
 
 ## Where it keeps things
 
@@ -124,3 +179,7 @@ The suite covers the parts where a mistake is expensive: what `PathGuard` refuse
 executor plans before it deletes and logs every item, that quarantine round-trips a folder and
 honors retention, and that the scanner records unreadable directories as issues rather than
 quietly understating the total.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

@@ -110,7 +110,7 @@ public sealed class QuarantinePage : PageBase
                 var item = new ListViewItem(manifest.OriginalPath) { Tag = manifest };
 
                 item.SubItems.Add(ByteSize.Format(manifest.OriginalSize));
-                item.SubItems.Add(manifest.FileCount == 0 ? "—" : ByteSize.Count(manifest.FileCount));
+                item.SubItems.Add(manifest.FileCount == 0 ? "-" : ByteSize.Count(manifest.FileCount));
                 item.SubItems.Add(manifest.QuarantinedAt.ToString("yyyy-MM-dd HH:mm"));
                 item.SubItems.Add(due <= TimeSpan.Zero
                     ? "due now"

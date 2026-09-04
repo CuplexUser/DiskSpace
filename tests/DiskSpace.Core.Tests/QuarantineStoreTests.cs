@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using DiskSpace.Core.Model;
 using DiskSpace.Core.Quarantine;
 using DiskSpace.Core.Rules;
@@ -20,8 +20,11 @@ public sealed class QuarantineStoreTests
         RemoveTargetDirectory = true,
     };
 
+    // SearchAllLocations is off everywhere in this file on purpose: a store that also scans
+    // the default location and every fixed volume would see the real quarantined items on the
+    // machine running the tests, and PurgeExpired would delete them.
     private static QuarantineStore StoreAt(string location, QuarantineMode mode) =>
-        new(new QuarantineOptions { Location = location, Mode = mode });
+        new(new QuarantineOptions { Location = location, Mode = mode, SearchAllLocations = false });
 
     [Fact]
     public async Task Archives_a_folder_then_restores_it_identically()
@@ -150,6 +153,7 @@ public sealed class QuarantineStoreTests
             Location = location,
             Mode = QuarantineMode.ArchiveToOtherVolume,
             Retention = TimeSpan.FromDays(-1),
+            SearchAllLocations = false,
         });
 
         await store.QuarantineAsync(source, Rule(source));

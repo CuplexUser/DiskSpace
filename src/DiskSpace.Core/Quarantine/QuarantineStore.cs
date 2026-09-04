@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using DiskSpace.Core.Rules;
 
 namespace DiskSpace.Core.Quarantine;
@@ -335,7 +335,12 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
     private IEnumerable<string> CandidateDirectories()
     {
         if (_options.Location is { } configured)
+        {
             yield return configured;
+
+            if (!_options.SearchAllLocations)
+                yield break;
+        }
 
         yield return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

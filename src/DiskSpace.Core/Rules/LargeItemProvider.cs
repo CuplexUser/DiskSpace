@@ -13,7 +13,7 @@ public sealed class LargeItemProvider : IRuleProvider
 {
     public string Name => "Large items (report only)";
 
-    private const string Category = "Large items — not removed";
+    private const string Category = "Large items (not removed)";
 
     public IEnumerable<CleanupRule> GetRules()
     {
@@ -84,12 +84,12 @@ public sealed class LargeItemProvider : IRuleProvider
         {
             yield return Report(
                 $"vhdx.{Path.GetFileNameWithoutExtension(path)}.{path.GetHashCode():x8}",
-                $"Virtual disk — {Path.GetFileName(path)}",
+                $"Virtual disk: {Path.GetFileName(path)}",
                 path,
                 "A WSL or Docker virtual disk. These grow as data is written and do not shrink "
                 + "when it is deleted, so this file is often far larger than its contents.",
                 "Deleting it destroys that distribution or all Docker data. Reclaim space "
-                + "inside it instead — `docker system prune -a` for Docker — then compact the "
+                + "inside it instead (`docker system prune -a` for Docker), then compact the "
                 + "disk with `wsl --manage <distro> --set-sparse true`, or `Optimize-VHD "
                 + "-Mode Full` on a stopped VM.");
         }

@@ -1,4 +1,4 @@
-using DiskSpace.Core.Cleaning;
+﻿using DiskSpace.Core.Cleaning;
 using DiskSpace.Core.Model;
 using DiskSpace.Core.Quarantine;
 using DiskSpace.Core.Rules;
@@ -244,6 +244,8 @@ public sealed class CleanupExecutorTests
         {
             Location = fixture.Dir("quarantine"),
             Mode = QuarantineMode.ArchiveToOtherVolume,
+            // Confined to the fixture, so this cannot see or purge real quarantined items.
+            SearchAllLocations = false,
         });
 
         var executor = new CleanupExecutor(store);

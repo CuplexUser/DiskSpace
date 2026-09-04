@@ -132,8 +132,8 @@ public sealed class OrphanedAppDataProvider : IRuleProvider
         };
 
         return $"If \"{name}\" is in fact still installed, it loses its settings and any sign-in "
-               + $"or licence stored here. Nothing on this machine claims this folder, and "
-               + $"{activity}. That is inference, not proof — which is why this is quarantined "
+               + $"or license stored here. Nothing on this machine claims this folder, and "
+               + $"{activity}. That is inference, not proof, which is why this is quarantined "
                + "rather than deleted, and can be restored.";
     }
 

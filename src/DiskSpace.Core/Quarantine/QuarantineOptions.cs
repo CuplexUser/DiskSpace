@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 
 namespace DiskSpace.Core.Quarantine;
 
@@ -28,6 +28,18 @@ public sealed class QuarantineOptions
     public string? Location { get; set; }
 
     public TimeSpan Retention { get; set; } = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// When true, listing and purging also look in the default location and in the
+    /// quarantine folder of every fixed volume, not just <see cref="Location"/>. That is
+    /// what lets the app still find items staged before the location setting was changed,
+    /// or staged onto a volume that is no longer the roomiest one.
+    ///
+    /// Set it false to confine a store to its configured location. Tests need that: a store
+    /// that reaches machine-wide would otherwise see, and purge, the real quarantined items
+    /// belonging to whoever is running them.
+    /// </summary>
+    public bool SearchAllLocations { get; set; } = true;
 
     /// <summary>
     /// Leftover application data is mostly text and compresses well, and writing fewer bytes

@@ -96,8 +96,8 @@ public sealed class BrowserAndElectronProvider : IRuleProvider
             Risk = RiskLevel.Safe,
             Description = $"Cached web content, compiled scripts and shaders for {name}.",
             WhatBreaks =
-                "Nothing. You stay signed in and keep your history, bookmarks and extensions — "
-                + "pages simply reload from the network the first time you revisit them.",
+                "Nothing. You stay signed in and keep your history, bookmarks and extensions. "
+                + "Pages simply reload from the network the first time you revisit them.",
             Root = userData,
             Targets = targets,
         };

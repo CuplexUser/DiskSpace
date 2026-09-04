@@ -1,4 +1,4 @@
-using DiskSpace.Core.Model;
+﻿using DiskSpace.Core.Model;
 using DiskSpace.Core.Rules;
 
 namespace DiskSpace.Core.Cleaning;
@@ -75,5 +75,9 @@ public sealed record CleanupReport
     public IEnumerable<CleanupOutcome> Failures => Outcomes.Where(o => !o.Succeeded);
 }
 
+/// <summary>
+/// Where a run has got to. <paramref name="Detail"/> is what is happening inside the current
+/// item, for the steps that take long enough that the item count alone looks stalled.
+/// </summary>
 public readonly record struct CleanupProgress(
-    int Completed, int Total, long BytesReclaimed, string CurrentPath);
+    int Completed, int Total, long BytesReclaimed, string CurrentPath, string? Detail = null);
