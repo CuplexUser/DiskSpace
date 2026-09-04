@@ -106,7 +106,12 @@ Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,DiskSpace}"; Flags: nowait postinstall skipifsilent
+; runascurrentuser is what makes this work at all. A postinstall entry is otherwise launched
+; with the credentials of the user who started Setup, before elevation, and CreateProcess
+; cannot elevate: starting a requireAdministrator executable that way fails with code 740.
+; Running it from Setup's own elevated token launches the app straight away, with no second
+; UAC prompt on top of the one already given to the installer.
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,DiskSpace}"; Flags: nowait postinstall skipifsilent runascurrentuser
 
 [Code]
 const
