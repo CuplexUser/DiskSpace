@@ -1,0 +1,22 @@
+<Project>
+
+  <!-- Settings shared by every project. Per-project files keep only what is genuinely
+       theirs: output type, framework-specific switches, and package references. -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Lets the Windows-targeted projects restore and build on a non-Windows host,
+         which is what makes `dotnet build` usable from CI containers and from WSL. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <!-- A warning that is tolerated locally is a warning that ships. CI is where that stops. -->
+  <PropertyGroup Condition="'$(ContinuousIntegrationBuild)' == 'true'">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,22 @@
+# Normalize line endings on commit, check out native.
+* text=auto
+
+# Windows-only tooling stays CRLF in the working tree.
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+*.sln   text eol=crlf
+*.slnx  text eol=crlf
+*.csproj text eol=crlf
+*.props text eol=crlf
+*.manifest text eol=crlf
+
+# Scripts that may be run under a POSIX shell.
+*.sh    text eol=lf
+
+# Binary
+*.png binary
+*.ico binary
+*.dll binary
+*.exe binary
+*.zip binary

@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DiskSpace.App/DiskSpace.App.csproj" />
+    <Project Path="src/DiskSpace.Core/DiskSpace.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DiskSpace.Core.Tests/DiskSpace.Core.Tests.csproj" />
+  </Folder>
+</Solution>
