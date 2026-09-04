@@ -19,6 +19,9 @@ public sealed class ScanPage : PageBase
     private readonly SplitContainer _split = new();
     private readonly AccentButton _scanButton = new();
     private readonly AccentButton _cleanButton = new();
+    private readonly AccentButton _safePreset = new();
+    private readonly AccentButton _cachePreset = new();
+    private readonly AccentButton _nonePreset = new();
     private readonly Label _status = new();
     private readonly Label _selectionSummary = new();
     private readonly ProgressStrip _progress = new();
@@ -57,13 +60,29 @@ public sealed class ScanPage : PageBase
         _cleanButton.Enabled = false;
         _cleanButton.Click += async (_, _) => await CleanAsync();
 
+        // Presets, because the two common cases are "everything that regenerates" and "start
+        // over", and picking those out of a tree of sixty findings by hand is the tedious part.
+        BuildPreset(_safePreset, "All safe", Gutter + 240, 86, () =>
+            _tree.SelectOnly(f => f.Rule.Risk == RiskLevel.Safe));
+
+        BuildPreset(_cachePreset, "Caches", Gutter + 332, 74, () =>
+            _tree.SelectOnly(f => f.Rule.Risk == RiskLevel.Safe && IsCache(f)));
+
+        BuildPreset(_nonePreset, "None", Gutter + 412, 62, _tree.ClearSelection);
+
         _selectionSummary.AutoSize = false;
-        _selectionSummary.Bounds = new Rectangle(Gutter + 240, 15, 460, 30);
         _selectionSummary.TextAlign = ContentAlignment.MiddleLeft;
         _selectionSummary.Font = AppTheme.UiFont;
 
         var toolbar = new Panel { Dock = DockStyle.Top, Height = 60 };
-        toolbar.Controls.AddRange([_scanButton, _cleanButton, _selectionSummary]);
+        toolbar.Controls.AddRange(
+            [_scanButton, _cleanButton, _safePreset, _cachePreset, _nonePreset, _selectionSummary]);
+
+        // Sized on resize rather than anchored: an anchor fixes the margin from whatever width
+        // the panel happened to have when the bounds were first set, which here is before it is
+        // docked, and the label ends up wider than the window it lives in.
+        toolbar.Resize += (_, _) => LayoutSummary(toolbar);
+        LayoutSummary(toolbar);
 
         _status.AutoSize = false;
         _status.Dock = DockStyle.Fill;
@@ -85,6 +104,30 @@ public sealed class ScanPage : PageBase
         Body.Controls.Add(statusBar);
         Body.Controls.Add(toolbar);
     }
+
+    private void LayoutSummary(Control toolbar)
+    {
+        var left = _nonePreset.Right + 16;
+        _selectionSummary.Bounds = new Rectangle(
+            left, 15, Math.Max(0, toolbar.ClientSize.Width - left - Gutter), 30);
+    }
+
+    private void BuildPreset(AccentButton button, string text, int x, int width, Action apply)
+    {
+        button.Text = text;
+        button.Kind = ButtonKind.Secondary;
+        button.Width = width;
+        button.Location = new Point(x, 15);
+        button.Enabled = false;
+        button.Click += (_, _) => apply();
+    }
+
+    /// <summary>
+    /// The categories a tool rebuilds on demand. Matched by category rather than by rule id, so
+    /// a cache provider added later is covered the day it lands.
+    /// </summary>
+    private static bool IsCache(CleanupFinding finding) =>
+        finding.Rule.Category.Contains("cache", StringComparison.OrdinalIgnoreCase);
 
     private void BuildBody()
     {
@@ -108,6 +151,7 @@ public sealed class ScanPage : PageBase
         var palette = AppTheme.Current;
 
         _cleanButton.Enabled = count > 0 && !IsBusy;
+        UpdatePresets();
 
         if (count == 0)
         {
@@ -271,6 +315,15 @@ public sealed class ScanPage : PageBase
             : $"{Path.GetFileName(failure.Path)}: {failure.Error}";
     }
 
+    private void UpdatePresets()
+    {
+        var ready = _findings.Count > 0 && !IsBusy;
+
+        _safePreset.Enabled = ready;
+        _cachePreset.Enabled = ready;
+        _nonePreset.Enabled = ready && _tree.Selected.Count > 0;
+    }
+
     private void SetBusy(bool busy, string scanLabel)
     {
         if (!busy)
@@ -279,6 +332,7 @@ public sealed class ScanPage : PageBase
         _scanButton.Text = busy ? "Cancel" : scanLabel;
         _scanButton.Kind = busy ? ButtonKind.Danger : ButtonKind.Primary;
         _cleanButton.Enabled = !busy && _tree.Selected.Count > 0;
+        UpdatePresets();
         _status.ForeColor = AppTheme.Current.TextMuted;
     }
 

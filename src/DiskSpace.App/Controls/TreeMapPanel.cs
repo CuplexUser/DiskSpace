@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using DiskSpace.App.Theme;
 using DiskSpace.Core.Model;
@@ -20,6 +20,9 @@ public sealed class TreeMapPanel : ThemedControl
     private const int MaxSeries = 8;
     private const int MinLabelWidth = 54;
     private const int MinLabelHeight = 24;
+
+    /// <summary>How much of a name has to survive truncation before it is worth drawing.</summary>
+    private const int MinLabelCharacters = 7;
 
     private sealed record Cell(DirectoryNode? Node, RectangleF Bounds, Color Fill, string Label, long Size);
 
@@ -327,20 +330,47 @@ public sealed class TreeMapPanel : ThemedControl
         var ink = Luminance(fill) > 0.55 ? Color.FromArgb(0x14, 0x16, 0x1A) : Color.White;
         var textRect = Rectangle.Round(RectangleF.Inflate(rect, -7, -5));
 
-        TextRenderer.DrawText(
-            g, cell.Label, AppTheme.UiFontBold,
-            new Rectangle(textRect.X, textRect.Y, textRect.Width, 15),
-            ink,
-            TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        if (WorthDrawing(g, cell.Label, AppTheme.UiFontBold, textRect.Width))
+        {
+            TextRenderer.DrawText(
+                g, cell.Label, AppTheme.UiFontBold,
+                new Rectangle(textRect.X, textRect.Y, textRect.Width, 15),
+                ink,
+                TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        }
 
         if (rect.Height < MinLabelHeight + 14)
             return;
 
+        // A size is a number: half of one is not a smaller truth, it is a wrong one, so it is
+        // drawn whole or not at all.
+        var size = ByteSize.Format(cell.Size);
+        if (!Fits(g, size, AppTheme.UiFontSmall, textRect.Width))
+            return;
+
         TextRenderer.DrawText(
-            g, ByteSize.Format(cell.Size), AppTheme.UiFontSmall,
+            g, size, AppTheme.UiFontSmall,
             new Rectangle(textRect.X, textRect.Y + 15, textRect.Width, 14),
             Color.FromArgb(205, ink),
-            TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            TextFormatFlags.Left | TextFormatFlags.NoPrefix);
+    }
+
+    private static bool Fits(Graphics g, string text, Font font, int width) =>
+        TextRenderer.MeasureText(
+            g, text, font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPrefix).Width
+        <= width;
+
+    /// <summary>
+    /// Whether an ellipsised label would still say anything. "Inno..." in a narrow cell is not
+    /// a smaller label, it is noise over a color that the tree and the tooltip already name.
+    /// </summary>
+    private static bool WorthDrawing(Graphics g, string text, Font font, int width)
+    {
+        if (Fits(g, text, font, width))
+            return true;
+
+        return text.Length > MinLabelCharacters
+               && Fits(g, string.Concat(text.AsSpan(0, MinLabelCharacters), "..."), font, width);
     }
 
     private static double Luminance(Color c) =>

@@ -14,7 +14,12 @@ namespace DiskSpace.Core.Cleaning;
 /// first shown. Every path is re-checked against <see cref="PathGuard"/> immediately before it
 /// is touched, because a plan that passed at preview time is not evidence that it still holds.
 /// </summary>
-public sealed class CleanupExecutor(QuarantineStore? quarantine = null)
+/// <param name="auditLogDirectory">
+/// Where the run log is written. Null means the real one under %LOCALAPPDATA%. Tests pass a
+/// temporary directory, because entries written here are indistinguishable from a real
+/// deletion afterwards.
+/// </param>
+public sealed class CleanupExecutor(QuarantineStore? quarantine = null, string? auditLogDirectory = null)
 {
     private readonly QuarantineStore _quarantine = quarantine ?? new QuarantineStore();
     private readonly PathGuard _guard = new();
@@ -52,7 +57,7 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null)
         long reclaimed = 0;
         var completed = 0;
 
-        using var log = AuditLog.StartRun();
+        using var log = AuditLog.StartRun(auditLogDirectory);
 
         // Archiving one large folder is a single plan item that can run for minutes. Without
         // this the bar would sit still through the slowest part of a run, so the quarantine

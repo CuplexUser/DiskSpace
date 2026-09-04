@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using DiskSpace.App.Platform;
 using DiskSpace.App.Theme;
@@ -18,6 +18,7 @@ public sealed class SizeTreeView : TreeView
 {
     private const int IndentWidth = 18;
     private const int ChevronWidth = 16;
+    private const int IconWidth = 22;
     private const int BarWidth = 110;
     private const int SizeWidth = 82;
     private const int PercentWidth = 52;
@@ -110,6 +111,27 @@ public sealed class SizeTreeView : TreeView
         base.OnAfterSelect(e);
         if (e.Node?.Tag is DirectoryNode directory)
             NodeHighlighted?.Invoke(this, directory);
+    }
+
+    /// <summary>
+    /// A click on the chevron or the folder icon expands the row, which is what those glyphs
+    /// look like they do. The name and the rest of the row keep selecting, and double-click
+    /// still drills in.
+    /// </summary>
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+
+        if (e.Button != MouseButtons.Left)
+            return;
+
+        var node = GetNodeAt(e.Location);
+        if (node?.Tag is not DirectoryNode || node.Nodes.Count == 0)
+            return;
+
+        var start = 8 + (node.Level * IndentWidth);
+        if (e.X >= start && e.X < start + ChevronWidth + IconWidth)
+            node.Toggle();
     }
 
     protected override void OnNodeMouseDoubleClick(TreeNodeMouseClickEventArgs e)
@@ -243,7 +265,7 @@ public sealed class SizeTreeView : TreeView
             Glyphs.Folder, _iconFont, brush,
             new PointF(x, row.Y + ((row.Height - size.Height) / 2f)));
 
-        x += 22;
+        x += IconWidth;
     }
 
     private static void PaintName(

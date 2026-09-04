@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -55,15 +55,24 @@ public sealed class AuditLog : IDisposable
         "DiskSpace",
         "logs");
 
-    public static AuditLog StartRun()
+    /// <summary>
+    /// Opens a log for one run.
+    ///
+    /// <paramref name="directory"/> overrides <see cref="LogDirectory"/>. Tests must pass one:
+    /// this log is the user's only account of what was deleted, and a test run appending to it
+    /// puts fabricated entries in the one file that is supposed to be trustworthy.
+    /// </summary>
+    public static AuditLog StartRun(string? directory = null)
     {
+        var folder = directory ?? LogDirectory;
+
         var path = Path.Combine(
-            LogDirectory,
+            folder,
             $"cleanup-{DateTime.Now:yyyy-MM-dd-HHmmss}.jsonl");
 
         try
         {
-            Directory.CreateDirectory(LogDirectory);
+            Directory.CreateDirectory(folder);
 
             var stream = new FileStream(
                 path, FileMode.Append, FileAccess.Write, FileShare.Read);
@@ -90,17 +99,19 @@ public sealed class AuditLog : IDisposable
         }
     }
 
-    /// <summary>Past runs, newest first.</summary>
-    public static IReadOnlyList<string> ListRuns()
+    /// <summary>Past runs, newest first. <paramref name="directory"/> overrides the default.</summary>
+    public static IReadOnlyList<string> ListRuns(string? directory = null)
     {
+        var folder = directory ?? LogDirectory;
+
         try
         {
-            if (!Directory.Exists(LogDirectory))
+            if (!Directory.Exists(folder))
                 return [];
 
             return
             [
-                .. Directory.EnumerateFiles(LogDirectory, "cleanup-*.jsonl")
+                .. Directory.EnumerateFiles(folder, "cleanup-*.jsonl")
                     .OrderByDescending(File.GetLastWriteTimeUtc),
             ];
         }

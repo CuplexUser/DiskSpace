@@ -38,7 +38,7 @@ public sealed class CleanupExecutorTests
         fixture.File("cache/sub/b.bin", 2000);
 
         var rule = CacheRule(cache);
-        var executor = new CleanupExecutor();
+        var executor = new CleanupExecutor(auditLogDirectory: fixture.Dir("logs"));
         var plan = executor.Plan([Finding(rule, cache, 3000)]);
 
         var report = await executor.ExecuteAsync(plan);
@@ -60,7 +60,7 @@ public sealed class CleanupExecutorTests
         fixture.File("leftover/a.bin", 500);
 
         var rule = CacheRule(leftover, removeRoot: true);
-        var executor = new CleanupExecutor();
+        var executor = new CleanupExecutor(auditLogDirectory: fixture.Dir("logs"));
 
         await executor.ExecuteAsync(executor.Plan([Finding(rule, leftover, 500)]));
 
@@ -70,7 +70,8 @@ public sealed class CleanupExecutorTests
     [Fact]
     public async Task Refuses_an_item_the_guard_rejects_even_when_it_is_in_the_plan()
     {
-        // A plan is not a licence: the guard runs again at execution time.
+        // A plan is not a license: the guard runs again at execution time.
+        using var fixture = new ScanFixture();
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         var rule = new CleanupRule
         {
@@ -84,7 +85,7 @@ public sealed class CleanupExecutorTests
             Targets = [Path.Combine(windows, "System32")],
         };
 
-        var executor = new CleanupExecutor();
+        var executor = new CleanupExecutor(auditLogDirectory: fixture.Dir("logs"));
         var plan = executor.Plan([Finding(rule, Path.Combine(windows, "System32"), 1)]);
 
         var report = await executor.ExecuteAsync(plan);
@@ -106,7 +107,7 @@ public sealed class CleanupExecutorTests
         fixture.CreateJunction("cache/link", outside);
 
         var rule = CacheRule(cache);
-        var executor = new CleanupExecutor();
+        var executor = new CleanupExecutor(auditLogDirectory: fixture.Dir("logs"));
 
         await executor.ExecuteAsync(executor.Plan([Finding(rule, cache, 100)]));
 
@@ -125,7 +126,7 @@ public sealed class CleanupExecutorTests
         fixture.File("cache/free.bin", 200);
 
         var rule = CacheRule(cache, removeRoot: true);
-        var executor = new CleanupExecutor();
+        var executor = new CleanupExecutor(auditLogDirectory: fixture.Dir("logs"));
 
         using (var hold = new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None))
         {
@@ -202,11 +203,12 @@ public sealed class CleanupExecutorTests
         var cache = fixture.Dir("cache");
         fixture.File("cache/a.bin", 1500);
 
+        var logs = fixture.Dir("logs");
         var before = DateTimeOffset.Now.AddSeconds(-5);
-        var executor = new CleanupExecutor();
+        var executor = new CleanupExecutor(auditLogDirectory: logs);
         await executor.ExecuteAsync(executor.Plan([Finding(CacheRule(cache), cache, 1500)]));
 
-        var latest = AuditLog.ListRuns().FirstOrDefault();
+        var latest = AuditLog.ListRuns(logs).FirstOrDefault();
         Assert.NotNull(latest);
 
         var entries = AuditLog.Read(latest!);
@@ -248,7 +250,7 @@ public sealed class CleanupExecutorTests
             SearchAllLocations = false,
         });
 
-        var executor = new CleanupExecutor(store);
+        var executor = new CleanupExecutor(store, fixture.Dir("logs"));
         var report = await executor.ExecuteAsync(executor.Plan([Finding(rule, orphan, 2)]));
 
         Assert.Equal(1, report.SucceededCount);

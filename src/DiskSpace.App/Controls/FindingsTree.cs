@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using DiskSpace.App.Platform;
 using DiskSpace.App.Theme;
@@ -105,6 +105,29 @@ public sealed class FindingsTree : TreeView
             EndUpdate();
         }
 
+        SelectionChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Deselects everything.</summary>
+    public void ClearSelection()
+    {
+        _selected.Clear();
+        Invalidate();
+        SelectionChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Replaces the selection with every actionable finding that matches. Report-only findings
+    /// can never be selected by a preset, whatever it asks for.
+    /// </summary>
+    public void SelectOnly(Func<CleanupFinding, bool> predicate)
+    {
+        _selected.Clear();
+
+        foreach (var finding in AllFindings().Where(f => f.IsActionable && predicate(f)))
+            _selected.Add(finding);
+
+        Invalidate();
         SelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 

@@ -1,4 +1,4 @@
-using DiskSpace.App.Controls;
+﻿using DiskSpace.App.Controls;
 using DiskSpace.App.Theme;
 using DiskSpace.Core.Model;
 using DiskSpace.Core.Quarantine;
@@ -14,7 +14,7 @@ namespace DiskSpace.App.Pages;
 /// </summary>
 public sealed class QuarantinePage : PageBase
 {
-    private readonly ListView _list = new();
+    private readonly ThemedListView _list = new();
     private readonly AccentButton _restoreButton = new();
     private readonly AccentButton _purgeButton = new();
     private readonly AccentButton _refreshButton = new();
