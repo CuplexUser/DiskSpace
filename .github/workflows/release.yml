@@ -1,0 +1,95 @@
+name: Release
+
+# Tagging vX.Y.Z (or vX.Y.Z-suffix) builds the installer for that version and publishes it as
+# a GitHub Release. The version lives in the tag, not in a commit to Directory.Build.props:
+# this job stamps it into a throwaway checkout, so tagging is the only step a release needs.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  release:
+    # windows-latest carries Inno Setup 6 preinstalled, which is what build.ps1 Installer
+    # shells out to via ISCC.exe.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Resolve version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag || github.ref_name }}"
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$') {
+            throw "Tag '$tag' is not in the form vX.Y.Z or vX.Y.Z-suffix."
+          }
+
+          $version = $Matches[1]
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "prerelease=$($version -match '-')" >> $env:GITHUB_OUTPUT
+
+      # Stamps Directory.Build.props in this checkout only; nothing is committed back. The tag
+      # is the source of truth for a release's version number.
+      - name: Stamp version
+        run: ./build.ps1 Version -SetVersion ${{ steps.version.outputs.version }}
+        shell: pwsh
+
+      - name: Restore
+        run: dotnet restore DiskSpace.slnx
+
+      - name: Test
+        run: dotnet test DiskSpace.slnx -c Release --logger "trx;LogFileName=test-results.trx" --results-directory artifacts/test-results
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: artifacts/test-results
+
+      - name: Build installer
+        run: ./build.ps1 Installer -Configuration Release
+        shell: pwsh
+
+      - name: Create release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $setup = Get-ChildItem artifacts/installer -Filter "*setup.exe" | Select-Object -First 1
+          if (-not $setup) {
+            throw "No installer was produced under artifacts/installer."
+          }
+
+          $args = @(
+            "${{ steps.version.outputs.tag }}",
+            $setup.FullName,
+            "--title", "DiskSpace ${{ steps.version.outputs.version }}",
+            "--generate-notes"
+          )
+          if ("${{ steps.version.outputs.prerelease }}" -eq "True") {
+            $args += "--prerelease"
+          }
+
+          gh release create @args

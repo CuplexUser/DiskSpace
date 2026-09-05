@@ -2,6 +2,7 @@ using DiskSpace.App.Controls;
 using DiskSpace.App.Pages;
 using DiskSpace.App.Platform;
 using DiskSpace.App.Theme;
+using DiskSpace.App.Updates;
 using DiskSpace.Core.Caching;
 using DiskSpace.Core.Quarantine;
 using DiskSpace.Core.Settings;
@@ -23,10 +24,13 @@ public sealed class MainForm : Form
     // to be the one the Explorer page reads on its next scan.
     private readonly TreeCache _cache = new();
     private readonly AppSettings _settings = AppSettings.Load();
+    private readonly AppUpdateManager _updates;
 
     public MainForm()
     {
-        Text = "DiskSpace";
+        _updates = new AppUpdateManager(_settings);
+
+        Text = $"DiskSpace {AppVersion.Current}";
         AppIcon.Apply(this);
         MinimumSize = new Size(1040, 660);
         Size = new Size(1320, 820);
@@ -51,6 +55,8 @@ public sealed class MainForm : Form
 
         PurgeExpiredQuarantine();
         SweepScanCache();
+
+        Shown += (_, _) => _ = _updates.CheckSilentlyAsync(this);
     }
 
     private void ApplySettings()
@@ -87,7 +93,7 @@ public sealed class MainForm : Form
 
         Register("log", "Log", Glyphs.History, () => new LogPage());
         Register("settings", "Settings", Glyphs.Settings, () =>
-            new SettingsPage(_quarantine, _settings, _cache));
+            new SettingsPage(_quarantine, _settings, _cache, _updates));
 
         _nav.SelectFirst();
     }
@@ -199,5 +205,13 @@ public sealed class MainForm : Form
         // other changes; AppTheme.Refresh is a no-op unless the resolved palette actually moved.
         if (m.Msg == NativeMethods.WmSettingChange)
             AppTheme.Refresh();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _updates.Dispose();
+
+        base.Dispose(disposing);
     }
 }

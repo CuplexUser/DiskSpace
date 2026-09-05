@@ -36,6 +36,15 @@ public sealed class AppSettings
     /// </summary>
     public bool TrustUnchangedFolders { get; set; }
 
+    /// <summary>Check GitHub for a newer release once a day, at startup.</summary>
+    public bool CheckForUpdatesAutomatically { get; set; } = true;
+
+    /// <summary>When the last check ran, automatic or manual. Throttles the automatic one.</summary>
+    public DateTime? LastUpdateCheckUtc { get; set; }
+
+    /// <summary>A release the user dismissed with "skip this version", so it is not asked again.</summary>
+    public string? SkippedUpdateVersion { get; set; }
+
     /// <summary>Where the settings file lives. Sibling of the run logs.</summary>
     public static string FilePath => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

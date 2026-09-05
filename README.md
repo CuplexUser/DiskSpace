@@ -139,6 +139,31 @@ What the installer does beyond copying a file:
 - **Leaves your data alone on uninstall.** Removing the app offers to delete the cleanup logs
   and never touches quarantined items, which may still be the only copy of something.
 
+## Releasing
+
+Pushing a tag of the form `vX.Y.Z` (or `vX.Y.Z-suffix`) runs
+[`release.yml`](.github/workflows/release.yml), which stamps that version into a throwaway
+checkout, builds and tests it, compiles the installer, and publishes it as a GitHub Release
+with the setup executable attached:
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The tag is the only source of truth for a release's version; nothing is committed back to
+`Directory.Build.props`. A `-suffix` tag is published as a pre-release. The workflow can also be
+re-run by hand from the Actions tab against an already-pushed tag.
+
+## Checking for updates
+
+The app asks GitHub for the latest release once a day at startup, and from a **Check now**
+button on the Settings page. A release newer than the running build shows a small dialog with
+the option to open its download; declining is remembered so the same version is not offered
+again. Both the check and the reminder can be turned off in Settings. The comparison and the
+GitHub call live in `DiskSpace.Core.Updates`; the dialog and the throttling live in
+`DiskSpace.App.Updates`.
+
 ## Versioning
 
 The version is written down in exactly one place, `Directory.Build.props`:
@@ -183,11 +208,14 @@ src/
     Cleaning/              CleanupExecutor, the audit log, Restart Manager interop
     Quarantine/            Archive, restore, retention
     Settings/              AppSettings: what the app remembers between runs
+    Updates/               GitHubUpdateChecker: asks GitHub for the latest release
     Model/                 ByteSize, RiskLevel
   DiskSpace.App/           WinForms, laid out in code, no designer files
     Pages/                 Scan, Programs, Explorer, Quarantine, Log, Settings
     Controls/              Treemap, size tree, findings tree, nav rail, progress strip
+    Dialogs/               Cleanup confirmation, update-available prompt
     Theme/                 Palette, fonts, glyphs, window icon; follows the Windows light/dark setting
+    Updates/               AppUpdateManager: throttling and the skip/remind decision
     Assets/                DiskSpace.ico, shared by the executable, its windows and the installer
 tests/
   DiskSpace.Core.Tests/    xUnit; the guard, executor, scanner and quarantine store

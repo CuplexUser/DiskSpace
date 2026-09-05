@@ -1,10 +1,12 @@
 using System.IO.Compression;
 using DiskSpace.App.Controls;
 using DiskSpace.App.Theme;
+using DiskSpace.App.Updates;
 using DiskSpace.Core.Caching;
 using DiskSpace.Core.Model;
 using DiskSpace.Core.Quarantine;
 using DiskSpace.Core.Settings;
+using DiskSpace.Core.Updates;
 
 namespace DiskSpace.App.Pages;
 
@@ -17,6 +19,7 @@ public sealed class SettingsPage : PageBase
     private readonly QuarantineStore _store;
     private readonly AppSettings _settings;
     private readonly TreeCache _cache;
+    private readonly AppUpdateManager _updates;
     private readonly ComboBox _themeBox = new();
     private readonly ComboBox _modeBox = new();
     private readonly ComboBox _compressionBox = new();
@@ -28,13 +31,17 @@ public sealed class SettingsPage : PageBase
     private readonly CheckBox _trustUnchanged = new();
     private readonly AccentButton _clearCache = new();
     private readonly Label _cacheNote = new();
+    private readonly CheckBox _autoUpdateCheck = new();
+    private readonly AccentButton _checkNowButton = new();
+    private readonly Label _updateStatus = new();
 
-    public SettingsPage(QuarantineStore store, AppSettings settings, TreeCache cache)
+    public SettingsPage(QuarantineStore store, AppSettings settings, TreeCache cache, AppUpdateManager updates)
         : base("Settings", "How scanning and quarantine behave, and which theme the window follows.")
     {
         _store = store;
         _settings = settings;
         _cache = cache;
+        _updates = updates;
 
         BuildControls();
         LoadValues();
@@ -52,6 +59,11 @@ public sealed class SettingsPage : PageBase
 
     private void BuildControls()
     {
+        // This page grows every time a setting is added to it, and already runs past a
+        // 720p-tall window; a body that clips instead of scrolling would hide whatever was
+        // added most recently, silently, on exactly the machines this app is meant to help.
+        Body.AutoScroll = true;
+
         _row = 20;
 
         AddLabel("Appearance", heading: true);
@@ -137,8 +149,36 @@ public sealed class SettingsPage : PageBase
         _locationNote.Bounds = new Rectangle(Gutter + 200, _row, 700, 34);
         _locationNote.Font = AppTheme.UiFontSmall;
         Body.Controls.Add(_locationNote);
+        _row += 44;
+
+        AddLabel("Updates", heading: true);
+
+        _autoUpdateCheck.Text = "Automatically check for updates on startup";
+        _autoUpdateCheck.AutoSize = false;
+        _autoUpdateCheck.Width = 430;
+        _autoUpdateCheck.Height = 22;
+        AddField(
+            "Update checks",
+            _autoUpdateCheck,
+            "Checks GitHub once a day, and only asks about a release you have not already skipped.");
+
+        _checkNowButton.Text = "Check now";
+        _checkNowButton.Kind = ButtonKind.Secondary;
+        _checkNowButton.Width = 108;
+        _checkNowButton.Location = new Point(Gutter + 200, _row);
+        _checkNowButton.Click += async (_, _) => await CheckForUpdatesNow();
+
+        _updateStatus.AutoSize = false;
+        _updateStatus.Bounds = new Rectangle(Gutter + 320, _row + 4, 460, 22);
+        _updateStatus.Font = AppTheme.UiFontSmall;
+        _updateStatus.Tag = "note";
+        _updateStatus.Text = $"Version {AppVersion.Current}.";
+
+        Body.Controls.AddRange([_checkNowButton, _updateStatus]);
+        _row += 44;
 
         _themeBox.SelectedIndexChanged += (_, _) => ApplyThemePreference();
+        _autoUpdateCheck.CheckedChanged += (_, _) => Save();
         _useCache.CheckedChanged += (_, _) => Save();
         _trustUnchanged.CheckedChanged += (_, _) => Save();
         _modeBox.SelectedIndexChanged += (_, _) => Save();
@@ -233,6 +273,8 @@ public sealed class SettingsPage : PageBase
         };
         _location.Text = options.Location ?? string.Empty;
 
+        _autoUpdateCheck.Checked = _settings.CheckForUpdatesAutomatically;
+
         UpdateLocationNote();
     }
 
@@ -270,6 +312,7 @@ public sealed class SettingsPage : PageBase
         _settings.UseScanCache = _useCache.Checked;
         _settings.TrustUnchangedFolders = _trustUnchanged.Checked;
         _trustUnchanged.Enabled = _useCache.Checked;
+        _settings.CheckForUpdatesAutomatically = _autoUpdateCheck.Checked;
 
         var options = _store.Options;
 
@@ -335,6 +378,28 @@ public sealed class SettingsPage : PageBase
         _locationNote.Text =
             $"Automatic: {automatic} ({ByteSize.Format(drive.AvailableFreeSpace)} free).";
         _locationNote.ForeColor = palette.TextMuted;
+    }
+
+    private async Task CheckForUpdatesNow()
+    {
+        _checkNowButton.Enabled = false;
+        _updateStatus.Text = "Checking…";
+
+        try
+        {
+            var result = await _updates.CheckNowAsync(FindForm());
+
+            _updateStatus.Text = result.Status switch
+            {
+                UpdateCheckStatus.UpdateAvailable => $"Version {result.Update!.Version} is available.",
+                UpdateCheckStatus.Failed => $"Could not check for updates: {result.Error}",
+                _ => $"You're up to date (version {AppVersion.Current}).",
+            };
+        }
+        finally
+        {
+            _checkNowButton.Enabled = true;
+        }
     }
 
     private void BrowseForLocation()
