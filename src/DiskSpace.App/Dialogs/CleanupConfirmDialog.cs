@@ -83,6 +83,7 @@ public sealed class CleanupConfirmDialog : Form
         // Full dialog width: the prompt names the confirmation word, so clipping it
         // would hide the instruction the button depends on.
         _prompt.Bounds = new Rectangle(18, 8, ClientSize.Width - 36, 22);
+        _prompt.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _prompt.Font = AppTheme.UiFont;
 
         _confirmBox.Bounds = new Rectangle(18, 34, 160, 26);
@@ -91,9 +92,6 @@ public sealed class CleanupConfirmDialog : Form
         _confirmBox.TextChanged += (_, _) => UpdateConfirmState();
         _confirmBox.Visible = _plan.NeedsExplicitConfirmation;
 
-        // Both buttons are placed from the right edge in one calculation, and Cancel is
-        // positioned off Confirm rather than off its own guess at the edge. Two independent
-        // offsets are what let these overlap in the first place.
         const int Margin = 18;
         const int Gap = 10;
         const int ButtonTop = 34;
@@ -101,20 +99,28 @@ public sealed class CleanupConfirmDialog : Form
         const int ConfirmWidth = 104;
         const int CancelWidth = 92;
 
-        var confirmLeft = ClientSize.Width - Margin - ConfirmWidth;
-        var cancelLeft = confirmLeft - Gap - CancelWidth;
-
         _cancelButton.Text = "Cancel";
-        _cancelButton.Bounds = new Rectangle(cancelLeft, ButtonTop, CancelWidth, ButtonHeight);
-        _cancelButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _cancelButton.Size = new Size(CancelWidth, ButtonHeight);
         _cancelButton.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
 
         _confirmButton.Kind = ButtonKind.Danger;
-        _confirmButton.Bounds = new Rectangle(confirmLeft, ButtonTop, ConfirmWidth, ButtonHeight);
-        _confirmButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _confirmButton.Size = new Size(ConfirmWidth, ButtonHeight);
         _confirmButton.Click += (_, _) => { DialogResult = DialogResult.OK; Close(); };
 
+        // A docked Panel is still DefaultSize until it is parented. Positioning Cancel
+        // and Delete from that width, then anchoring them Right, pushed both off the
+        // edge once the footer stretched to the dialog.
+        void PositionButtons()
+        {
+            var confirmLeft = footer.ClientSize.Width - Margin - ConfirmWidth;
+            var cancelLeft = confirmLeft - Gap - CancelWidth;
+            _confirmButton.Location = new Point(confirmLeft, ButtonTop);
+            _cancelButton.Location = new Point(cancelLeft, ButtonTop);
+        }
+
+        footer.Resize += (_, _) => PositionButtons();
         footer.Controls.AddRange([_prompt, _confirmBox, _cancelButton, _confirmButton]);
+        PositionButtons();
 
         Controls.Add(listHost);
         Controls.Add(footer);
