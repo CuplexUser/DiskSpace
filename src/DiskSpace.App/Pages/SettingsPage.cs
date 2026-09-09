@@ -33,6 +33,8 @@ public sealed class SettingsPage : PageBase
     private readonly Label _cacheNote = new();
     private readonly CheckBox _autoUpdateCheck = new();
     private readonly AccentButton _checkNowButton = new();
+
+    private readonly Panel _updatePanel = new();
     private readonly Label _updateStatus = new();
 
     public SettingsPage(QuarantineStore store, AppSettings settings, TreeCache cache, AppUpdateManager updates)
@@ -165,16 +167,19 @@ public sealed class SettingsPage : PageBase
         _checkNowButton.Text = "Check now";
         _checkNowButton.Kind = ButtonKind.Secondary;
         _checkNowButton.Width = 108;
-        _checkNowButton.Location = new Point(Gutter + 200, _row);
         _checkNowButton.Click += async (_, _) => await CheckForUpdatesNow();
+        _checkNowButton.Height = 30;
 
-        _updateStatus.AutoSize = false;
-        _updateStatus.Bounds = new Rectangle(Gutter + 320, _row + 4, 460, 22);
+        _updateStatus.AutoSize = false;        
         _updateStatus.Font = AppTheme.UiFontSmall;
         _updateStatus.Tag = "note";
         _updateStatus.Text = $"Version {AppVersion.Current}.";
+        _updateStatus.Bounds = new Rectangle(120, 4, 340, 25);        
 
-        Body.Controls.AddRange([_checkNowButton, _updateStatus]);
+        _updatePanel.Bounds = new Rectangle(Gutter + 200, _row + 4, 460, 60);
+        _updatePanel.Controls.AddRange([_checkNowButton, _updateStatus]);
+
+        Body.Controls.Add(_updatePanel);
         _row += 44;
 
         _themeBox.SelectedIndexChanged += (_, _) => ApplyThemePreference();
