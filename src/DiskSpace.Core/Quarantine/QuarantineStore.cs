@@ -210,14 +210,16 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
 
         Directory.Move(sourcePath, destination);
 
+        var (bytes, files) = Measure(destination);
+
         var manifest = new QuarantineManifest
         {
             Id = id,
             OriginalPath = sourcePath,
             ArchivePath = Path.Combine(root, id + ".zip"),
             MovedToPath = destination,
-            OriginalSize = 0,
-            FileCount = 0,
+            OriginalSize = bytes,
+            FileCount = files,
             QuarantinedAt = DateTimeOffset.Now,
             PurgeAfter = DateTimeOffset.Now + _options.Retention,
             RuleId = rule.Id,
@@ -226,6 +228,43 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
 
         manifest.Save();
         return manifest;
+    }
+
+    /// <summary>
+    /// What a moved-aside folder holds, measured after the move rather than before it.
+    ///
+    /// A rename reports nothing about what it moved, and a manifest claiming zero bytes makes
+    /// the quarantine page list the item as 0 B and offer to free nothing by purging it. This
+    /// is a metadata-only walk, so it costs a fraction of the copy the move avoided.
+    /// </summary>
+    private static (long Bytes, long Files) Measure(string path)
+    {
+        long bytes = 0;
+        long files = 0;
+
+        try
+        {
+            var options = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                // A junction's target was never moved here, so its bytes are not ours to claim.
+                AttributesToSkip = FileAttributes.ReparsePoint,
+            };
+
+            foreach (var file in new DirectoryInfo(path).EnumerateFiles("*", options))
+            {
+                bytes += file.Length;
+                files++;
+            }
+        }
+        catch (Exception)
+        {
+            // The move already succeeded; an unmeasurable folder is reported as empty rather
+            // than turned into a failure.
+        }
+
+        return (bytes, files);
     }
 
     /// <summary>Puts a quarantined folder back exactly where it came from.</summary>
@@ -278,7 +317,22 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
     public static void Purge(QuarantineManifest manifest)
     {
         if (manifest.MovedToPath is { } moved && Directory.Exists(moved))
-            Directory.Delete(moved, recursive: true);
+        {
+            // Not Directory.Delete: a moved-aside folder keeps the attributes it arrived with,
+            // and that call throws on the first read-only file it meets. Application data is
+            // full of them — git marks every pack file read-only — so the item would fail to
+            // purge here and at every startup afterwards, with no way to get rid of it.
+            Safety.SafeDelete.DeleteDirectory(moved, removeRoot: true);
+
+            // SafeDelete skips what it cannot remove rather than throwing, so the manifest is
+            // only dropped once the folder is actually gone. A half-emptied folder that still
+            // has a manifest can at least be looked at and retried.
+            if (Directory.Exists(moved))
+            {
+                throw new IOException(
+                    $"{moved} could not be fully removed; some of it is still in use.");
+            }
+        }
 
         TryDelete(manifest.ArchivePath);
         TryDelete(manifest.ManifestPath);

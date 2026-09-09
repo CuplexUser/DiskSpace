@@ -140,6 +140,28 @@ public sealed class QuarantineStoreTests
     }
 
     [Fact]
+    public async Task Purges_a_moved_aside_folder_that_holds_read_only_files()
+    {
+        using var fixture = new ScanFixture();
+        var location = fixture.Dir("quarantine");
+        var source = fixture.Dir("orphan");
+        var readOnly = fixture.File("orphan/pack/objects.pack", 100);
+        File.SetAttributes(readOnly, FileAttributes.ReadOnly);
+
+        var store = StoreAt(location, QuarantineMode.MoveOnSameVolume);
+        var manifest = await store.QuarantineAsync(source, Rule(source));
+
+        // A rename says nothing about what it moved, so the manifest has to measure it.
+        Assert.Equal(100, manifest.OriginalSize);
+        Assert.Equal(1, manifest.FileCount);
+
+        QuarantineStore.Purge(manifest);
+
+        Assert.False(Directory.Exists(manifest.MovedToPath!));
+        Assert.Empty(store.List());
+    }
+
+    [Fact]
     public async Task Purges_only_items_past_their_retention_date()
     {
         using var fixture = new ScanFixture();

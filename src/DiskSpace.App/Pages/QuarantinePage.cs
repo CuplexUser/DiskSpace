@@ -97,7 +97,12 @@ public sealed class QuarantinePage : PageBase
 
     public override void OnActivated() => Reload();
 
-    private void Reload()
+    /// <summary>
+    /// Repopulates the list. <paramref name="message"/> replaces the usual summary line: a
+    /// restore or a purge has something to say about what just happened, and the reload that
+    /// follows it must not wipe that out before it has been read.
+    /// </summary>
+    private void Reload(string? message = null, Color? color = null)
     {
         _list.BeginUpdate();
         try
@@ -128,10 +133,10 @@ public sealed class QuarantinePage : PageBase
         }
 
         var total = _store.List().Sum(m => m.OriginalSize);
-        _status.Text = _list.Items.Count == 0
+        _status.Text = message ?? (_list.Items.Count == 0
             ? "Nothing quarantined."
-            : $"{_list.Items.Count} item(s) staged · {ByteSize.Format(total)} recoverable";
-        _status.ForeColor = AppTheme.Current.TextMuted;
+            : $"{_list.Items.Count} item(s) staged · {ByteSize.Format(total)} recoverable");
+        _status.ForeColor = color ?? AppTheme.Current.TextMuted;
     }
 
     private IReadOnlyList<QuarantineManifest> SelectedManifests() =>
@@ -145,6 +150,7 @@ public sealed class QuarantinePage : PageBase
 
         _restoreButton.Enabled = false;
         var restored = 0;
+        string? failure = null;
 
         foreach (var manifest in manifests)
         {
@@ -157,19 +163,15 @@ public sealed class QuarantinePage : PageBase
             }
             catch (Exception ex)
             {
-                _status.Text = $"Could not restore {manifest.OriginalPath}: {ex.Message}";
-                _status.ForeColor = AppTheme.Current.RiskAdvanced;
+                failure = $"Could not restore {manifest.OriginalPath}: {ex.Message}";
                 break;
             }
         }
 
-        if (restored > 0 && _status.ForeColor != AppTheme.Current.RiskAdvanced)
-        {
-            _status.Text = $"Restored {restored} item(s).";
-            _status.ForeColor = AppTheme.Current.RiskSafe;
-        }
+        Reload(
+            failure ?? $"Restored {restored} item(s).",
+            failure is null ? AppTheme.Current.RiskSafe : AppTheme.Current.RiskAdvanced);
 
-        Reload();
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -192,20 +194,26 @@ public sealed class QuarantinePage : PageBase
         if (answer != DialogResult.OK)
             return;
 
+        var purged = 0;
+        string? failure = null;
+
         foreach (var manifest in manifests)
         {
             try
             {
                 QuarantineStore.Purge(manifest);
+                purged++;
             }
             catch (Exception ex)
             {
-                _status.Text = $"Could not purge {manifest.Id}: {ex.Message}";
-                _status.ForeColor = AppTheme.Current.RiskAdvanced;
+                failure = $"Could not purge {manifest.OriginalPath}: {ex.Message}";
             }
         }
 
-        Reload();
+        Reload(
+            failure ?? $"Purged {purged} item(s).",
+            failure is null ? AppTheme.Current.RiskSafe : AppTheme.Current.RiskAdvanced);
+
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
