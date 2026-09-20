@@ -20,6 +20,7 @@ public sealed class AccentButton : ThemedControl
 {
     private bool _hovered;
     private bool _pressed;
+    private ButtonKind _kind = ButtonKind.Secondary;
 
     public AccentButton()
     {
@@ -29,7 +30,24 @@ public sealed class AccentButton : ThemedControl
     }
 
     [System.ComponentModel.DefaultValue(ButtonKind.Secondary)]
-    public ButtonKind Kind { get; set; } = ButtonKind.Secondary;
+    public ButtonKind Kind
+    {
+        get => _kind;
+        set
+        {
+            if (_kind == value)
+                return;
+
+            _kind = value;
+            Invalidate();
+        }
+    }
+
+    protected override void OnTextChanged(EventArgs e)
+    {
+        base.OnTextChanged(e);
+        Invalidate();
+    }
 
     protected override void OnMouseEnter(EventArgs e)
     {

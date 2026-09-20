@@ -375,16 +375,21 @@ public sealed class TreeMapPanel : ThemedControl
         var ink = Luminance(fill) > 0.55 ? Color.FromArgb(0x14, 0x16, 0x1A) : Color.White;
         var textRect = Rectangle.Round(RectangleF.Inflate(rect, -7, -5));
 
+        // Sized from the font's own line height rather than a fixed pixel count, so a larger
+        // system text scale gets room to draw instead of having its descenders clipped.
+        var labelLineHeight = AppTheme.UiFontBold.Height + 2;
+        var sizeLineHeight = AppTheme.UiFontSmall.Height + 2;
+
         if (WorthDrawing(g, cell.Label, AppTheme.UiFontBold, textRect.Width))
         {
             TextRenderer.DrawText(
                 g, cell.Label, AppTheme.UiFontBold,
-                new Rectangle(textRect.X, textRect.Y, textRect.Width, 15),
+                new Rectangle(textRect.X, textRect.Y, textRect.Width, labelLineHeight),
                 ink,
                 TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
 
-        if (rect.Height < MinLabelHeight + 14)
+        if (rect.Height < MinLabelHeight + sizeLineHeight)
             return;
 
         // A size is a number: half of one is not a smaller truth, it is a wrong one, so it is
@@ -395,7 +400,7 @@ public sealed class TreeMapPanel : ThemedControl
 
         TextRenderer.DrawText(
             g, size, AppTheme.UiFontSmall,
-            new Rectangle(textRect.X, textRect.Y + 15, textRect.Width, 14),
+            new Rectangle(textRect.X, textRect.Y + labelLineHeight, textRect.Width, sizeLineHeight),
             Color.FromArgb(205, ink),
             TextFormatFlags.Left | TextFormatFlags.NoPrefix);
     }

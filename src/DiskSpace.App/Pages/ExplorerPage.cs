@@ -39,6 +39,7 @@ public sealed class ExplorerPage : PageBase
     private readonly Breadcrumb _breadcrumb = new();
     private readonly Label _status = new();
     private readonly SplitContainer _split = new();
+    private readonly ToolTip _toolTip = new() { InitialDelay = 400, ReshowDelay = 100, ShowAlways = true };
     private readonly System.Windows.Forms.Timer _refresh = new() { Interval = RefreshIntervalMs };
     private readonly TreeCache _cache;
     private readonly AppSettings _settings;
@@ -82,6 +83,7 @@ public sealed class ExplorerPage : PageBase
         _scanButton.Width = 92;
         _scanButton.Location = new Point(Gutter + 484, 15);
         _scanButton.Click += async (_, _) => await ToggleScanAsync(ignoreCache: false);
+        _toolTip.SetToolTip(_scanButton, "Measure this folder. Uses a cached measurement to show numbers instantly, then confirms them against disk.");
 
         // Always offered, because a cached tree is a starting point and not an answer, and there
         // has to be a way to ask for a number with no remembered input at all.
@@ -90,6 +92,7 @@ public sealed class ExplorerPage : PageBase
         _fullButton.Width = 108;
         _fullButton.Location = new Point(Gutter + 586, 15);
         _fullButton.Click += async (_, _) => await ToggleScanAsync(ignoreCache: true);
+        _toolTip.SetToolTip(_fullButton, "Ignore the cache and walk every file again from scratch, even folders that have not changed.");
 
         // Only shown when the settling re-sort was held back because the tree was in use.
         // Sorting rows out from under the pointer is hostile, so the move is left to the user.
@@ -389,6 +392,7 @@ public sealed class ExplorerPage : PageBase
             // outlives this page by a moment has nothing left to touch.
             _scanner?.Cancel();
             _cancellation?.Cancel();
+            _toolTip.Dispose();
         }
 
         base.Dispose(disposing);

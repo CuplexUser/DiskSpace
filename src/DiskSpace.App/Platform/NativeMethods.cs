@@ -15,6 +15,9 @@ internal static partial class NativeMethods
     private const int DwmwaBorderColor = 34;
     private const int CornerPreferenceRound = 2;
 
+    private const int TvmSetExtendedStyle = 0x112C;
+    private const int TvsExDoubleBuffer = 0x0004;
+
     /// <summary>Sent when the user changes the system theme, among many other settings.</summary>
     internal const int WmSettingChange = 0x001A;
 
@@ -25,6 +28,9 @@ internal static partial class NativeMethods
     [LibraryImport("uxtheme.dll", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int SetWindowTheme(
         IntPtr hwnd, string subAppName, string? subIdList);
+
+    [LibraryImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static partial IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
 
     /// <summary>
     /// Applies the immersive dark title bar. Fails harmlessly on builds that predate the
@@ -62,6 +68,20 @@ internal static partial class NativeMethods
             return;
 
         SetWindowTheme(handle, dark ? "DarkMode_Explorer" : "Explorer", null);
+    }
+
+    /// <summary>
+    /// Turns on the comctl32 double-buffered painting a native TreeView does not get from
+    /// WinForms' own <c>ControlStyles</c>, since owner-drawn rows there are painted by the
+    /// native control itself, not through <see cref="Control.OnPaint"/>. Without this an
+    /// owner-drawn TreeView flickers and briefly ghosts rows on every repaint.
+    /// </summary>
+    internal static void ApplyTreeViewDoubleBuffering(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero)
+            return;
+
+        SendMessage(handle, TvmSetExtendedStyle, (IntPtr)TvsExDoubleBuffer, (IntPtr)TvsExDoubleBuffer);
     }
 
     /// <summary>True when the process holds an elevated token.</summary>

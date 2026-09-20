@@ -465,6 +465,7 @@ public sealed class SizeTreeView : TreeView
         BackColor = AppTheme.Current.Surface;
         // Without this the scrollbar stays bright white inside a dark window.
         NativeMethods.ApplyExplorerTheme(Handle, AppTheme.Current.IsDark);
+        NativeMethods.ApplyTreeViewDoubleBuffering(Handle);
     }
 
     protected override void OnDrawNode(DrawTreeNodeEventArgs e)
