@@ -34,6 +34,7 @@ public sealed class ExplorerPage : PageBase
     private readonly AccentButton _browseButton = new();
     private readonly AccentButton _fullButton = new();
     private readonly AccentButton _sortButton = new();
+    private readonly SizeTreeHeader _treeHeader = new();
     private readonly SizeTreeView _tree = new();
     private readonly TreeMapPanel _treeMap = new();
     private readonly Breadcrumb _breadcrumb = new();
@@ -139,12 +140,17 @@ public sealed class ExplorerPage : PageBase
         // is what the running scan reorders itself around.
         _tree.NodeExpanded += (_, node) => _scanner?.Prioritize(node);
 
+        _treeHeader.SortRequested += (_, sort) => _tree.SetSort(sort.Column, sort.Descending);
+
         _treeMap.CellActivated += (_, node) => _tree.SelectDirectory(node);
         _treeMap.CellSelected += (_, node) => _breadcrumb.SetPath(node);
 
         _breadcrumb.SegmentClicked += (_, node) => _tree.SelectDirectory(node);
 
+        // Fill-docked control added first, header added after: docking resolves in reverse add
+        // order, so the header claims its strip off the top before the tree fills what is left.
         _split.Panel1.Controls.Add(_tree);
+        _split.Panel1.Controls.Add(_treeHeader);
         _split.Panel2.Controls.Add(_treeMap);
         _split.Panel2.Controls.Add(_breadcrumb);
 
@@ -204,6 +210,13 @@ public sealed class ExplorerPage : PageBase
         _cancellation = new CancellationTokenSource();
         _scanButton.Text = "Cancel";
         _scanButton.Kind = ButtonKind.Danger;
+
+        // Disabling the button that was just clicked (Rescan) hands focus to whatever is next
+        // in tab order, which is the tree. Claiming focus here first keeps it there instead, so
+        // the settle pass at the end doesn't mistake that stray focus for the user working in
+        // the tree and hold back the re-sort.
+        _scanButton.Focus();
+
         _rootBox.Enabled = false;
         _browseButton.Enabled = false;
         _fullButton.Enabled = false;

@@ -7,6 +7,13 @@ using DiskSpace.Core.Scanning;
 
 namespace DiskSpace.App.Controls;
 
+/// <summary>What a row is ordered by, chosen from the header above the tree.</summary>
+public enum SortColumn
+{
+    Name,
+    Size,
+}
+
 /// <summary>
 /// A directory tree with an inline proportional size bar on every row.
 ///
@@ -22,12 +29,15 @@ namespace DiskSpace.App.Controls;
 public sealed class SizeTreeView : TreeView
 {
     private const int IndentWidth = 18;
-    private const int ChevronWidth = 16;
-    private const int IconWidth = 22;
-    private const int BarWidth = 110;
-    private const int SizeWidth = 82;
-    private const int PercentWidth = 52;
-    private const int RightPadding = 12;
+
+    // Internal rather than private: SizeTreeHeader lines its column labels up against these so
+    // the two controls read as one, without duplicating the layout math.
+    internal const int ChevronWidth = 16;
+    internal const int IconWidth = 22;
+    internal const int BarWidth = 110;
+    internal const int SizeWidth = 82;
+    internal const int PercentWidth = 52;
+    internal const int RightPadding = 12;
 
     /// <summary>
     /// Rows materialized for one directory before the rest are folded into a single line.
@@ -53,6 +63,8 @@ public sealed class SizeTreeView : TreeView
 
     private readonly Font _iconFont = FontResolver.Icons(10f);
     private DirectoryNode? _root;
+    private SortColumn _sortColumn = SortColumn.Size;
+    private bool _sortDescending = true;
 
     public SizeTreeView()
     {
@@ -86,6 +98,18 @@ public sealed class SizeTreeView : TreeView
     /// are sorted once at expand time and their numbers keep climbing afterwards.
     /// </summary>
     public bool IsOrderStale { get; private set; }
+
+    /// <summary>
+    /// Changes what the tree is ordered by and re-sorts every expanded row immediately. Unlike
+    /// the settling pass, this is a direct response to the user clicking a column header, so it
+    /// is never held back by the row being under the pointer.
+    /// </summary>
+    public void SetSort(SortColumn column, bool descending)
+    {
+        _sortColumn = column;
+        _sortDescending = descending;
+        ResortVisible();
+    }
 
     public void Load(DirectoryNode root)
     {
@@ -253,7 +277,7 @@ public sealed class SizeTreeView : TreeView
             row.Nodes.Clear();
 
             var shown = 0;
-            foreach (var child in directory.ChildrenBySize)
+            foreach (var child in OrderedChildren(directory))
             {
                 if (shown == MaxMaterializedChildren)
                 {
@@ -319,16 +343,38 @@ public sealed class SizeTreeView : TreeView
         }
     }
 
-    private static bool IsOutOfOrder(TreeNode row)
+    /// <summary>
+    /// Children in the order the current column and direction want them. Not
+    /// <see cref="DirectoryNode.ChildrenBySize"/> because that is always size-descending, and a
+    /// column header lets the user ask for the opposite of either field.
+    /// </summary>
+    private IEnumerable<DirectoryNode> OrderedChildren(DirectoryNode directory) => _sortColumn switch
     {
-        var previous = long.MaxValue;
+        SortColumn.Name => _sortDescending
+            ? directory.Children.OrderByDescending(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            : directory.Children.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase),
+        _ => _sortDescending
+            ? directory.Children.OrderByDescending(c => c.TotalSize)
+            : directory.Children.OrderBy(c => c.TotalSize),
+    };
+
+    /// <summary>
+    /// Names never change once listed, so a name-sorted row can never drift out of order the way
+    /// a size-sorted one does as totals climb; only size sorting needs to be watched for staleness.
+    /// </summary>
+    private bool IsOutOfOrder(TreeNode row)
+    {
+        if (_sortColumn != SortColumn.Size)
+            return false;
+
+        var previous = _sortDescending ? long.MaxValue : long.MinValue;
 
         foreach (TreeNode child in row.Nodes)
         {
             if (DirectoryOf(child) is not { } directory)
                 continue;
 
-            if (directory.TotalSize > previous)
+            if (_sortDescending ? directory.TotalSize > previous : directory.TotalSize < previous)
                 return true;
 
             previous = directory.TotalSize;
