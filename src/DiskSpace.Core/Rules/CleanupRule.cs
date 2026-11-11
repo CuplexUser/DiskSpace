@@ -58,6 +58,30 @@ public sealed record CleanupRule
     /// are gone.
     /// </summary>
     public PurgeCommand? Purge { get; init; }
+
+    /// <summary>
+    /// Set when the data belongs to a Windows component that measures and removes it itself.
+    /// Such a rule proposes no paths of its own, so <see cref="Targets"/> is empty and
+    /// <see cref="Root"/> only says where the data lives, for display.
+    /// </summary>
+    public ISystemCleaner? Cleaner { get; init; }
+}
+
+/// <summary>
+/// Something that owns its data and has its own way of measuring and removing it, where
+/// deleting the files underneath it would be wrong or impossible. The component store is the
+/// plain example: only Windows can say which of its files are superseded.
+/// </summary>
+public interface ISystemCleaner
+{
+    /// <summary>What does the removing, in a sentence. Shown in the detail pane.</summary>
+    string Description { get; }
+
+    /// <summary>Bytes it would free right now, or null when it has nothing to offer.</summary>
+    Task<long?> MeasureAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Runs the cleanup and returns the bytes freed.</summary>
+    Task<long> CleanAsync(IProgress<long>? progress = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>A tool's own cache-clearing command, e.g. <c>npm cache clean --force</c>.</summary>

@@ -1,5 +1,6 @@
 using System.Drawing.Text;
 using DiskSpace.App.Theme;
+using DiskSpace.Core.Cleaning;
 using DiskSpace.Core.Model;
 using DiskSpace.Core.Rules;
 
@@ -55,7 +56,11 @@ public sealed class FindingDetailPane : ThemedControl
         y = DrawSection(g, palette, "WHAT THIS IS", _finding.Rule.Description, width, y);
         y = DrawSection(g, palette, "WHAT BREAKS", _finding.Rule.WhatBreaks, width, y, emphasis: true);
 
-        if (_finding.Rule.Purge is { } purge)
+        if (_finding.Rule.Cleaner is { } cleaner)
+        {
+            y = DrawSection(g, palette, "REMOVED BY", cleaner.Description, width, y);
+        }
+        else if (_finding.Rule.Purge is { } purge)
         {
             y = DrawSection(
                 g, palette, "CLEARED USING",
@@ -83,7 +88,9 @@ public sealed class FindingDetailPane : ThemedControl
         var (label, color) = finding.Rule.Risk switch
         {
             RiskLevel.Safe => ("Safe: regenerates on demand", palette.RiskSafe),
-            RiskLevel.Review => ("Review: quarantined, restorable", palette.RiskReview),
+            RiskLevel.Review when CleanupExecutor.WouldQuarantine(finding) =>
+                ("Review: quarantined, restorable", palette.RiskReview),
+            RiskLevel.Review => ("Review: may not be replaceable, deleted permanently", palette.RiskReview),
             RiskLevel.Advanced => ("Advanced: affects system state", palette.RiskAdvanced),
             _ => ("Information only: not removed", palette.RiskReport),
         };
@@ -100,12 +107,20 @@ public sealed class FindingDetailPane : ThemedControl
 
     private static int DrawStats(Graphics g, Palette palette, CleanupFinding finding, int width, int y)
     {
-        var stats = new (string Label, string Value)[]
-        {
-            ("Size", ByteSize.Format(finding.Size)),
-            ("Files", ByteSize.Count(finding.FileCount)),
-            ("Last written", Age(finding.LastWriteUtc)),
-        };
+        // Windows reports a size for what it owns and nothing else, so the columns this tool
+        // would have to invent are left out.
+        var stats = finding.Rule.Cleaner is not null
+            ? new (string Label, string Value)[]
+            {
+                ("Size", ByteSize.Format(finding.Size)),
+                ("Measured by", "Windows"),
+            }
+            : new (string Label, string Value)[]
+            {
+                ("Size", ByteSize.Format(finding.Size)),
+                ("Files", ByteSize.Count(finding.FileCount)),
+                ("Last written", Age(finding.LastWriteUtc)),
+            };
 
         var columnWidth = width / stats.Length;
 

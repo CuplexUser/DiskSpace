@@ -166,6 +166,26 @@ public sealed class PathGuardTests
         Assert.True(verdict.Allowed, verdict.Reason);
     }
 
+    // ---- What a Windows-run cleanup may be pointed at ----------------------------------------
+
+    [Fact]
+    public void Recognizes_user_data_from_inside_and_from_above()
+    {
+        // Inside a protected folder, the folder itself, and a parent that would sweep it up.
+        Assert.True(_guard.TouchesUserData(Path.Combine(Profile, "Downloads")));
+        Assert.True(_guard.TouchesUserData(Path.Combine(Profile, "Documents", "taxes.xlsx")));
+        Assert.True(_guard.TouchesUserData(Profile));
+    }
+
+    [Fact]
+    public void Does_not_mistake_system_and_cache_locations_for_user_data()
+    {
+        Assert.False(_guard.TouchesUserData(Path.Combine(Windows, "Temp")));
+        Assert.False(_guard.TouchesUserData(Path.Combine(Windows, "System32", "LogFiles")));
+        Assert.False(_guard.TouchesUserData(Path.Combine(LocalAppData, "Temp")));
+        Assert.False(_guard.TouchesUserData(string.Empty));
+    }
+
     // ---- Canonicalizer behaviour it all rests on --------------------------------------------
 
     [Fact]

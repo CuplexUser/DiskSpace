@@ -3,11 +3,15 @@ using DiskSpace.Core.Rules;
 
 namespace DiskSpace.Core.Cleaning;
 
-/// <summary>How an item leaves: deleted outright, or staged where it can be restored.</summary>
+/// <summary>
+/// How an item leaves: deleted outright, staged where it can be restored, or removed by the
+/// Windows component that owns it.
+/// </summary>
 public enum Disposal
 {
     Delete,
     Quarantine,
+    Windows,
 }
 
 /// <summary>One item in a plan: a concrete path, its measured size, and how it will be removed.</summary>
@@ -40,10 +44,10 @@ public sealed record CleanupPlan
     public bool ContainsQuarantine => Items.Any(i => i.Disposal == Disposal.Quarantine);
 
     /// <summary>
-    /// True when the plan holds anything beyond routine caches. The confirmation dialog demands
-    /// a typed acknowledgement in that case, because deletion here is permanent.
+    /// True when the plan holds anything beyond routine caches. The confirmation dialog says so
+    /// and styles its button as destructive, because deletion here is permanent.
     /// </summary>
-    public bool NeedsExplicitConfirmation =>
+    public bool GoesBeyondCaches =>
         Items.Any(i => i.Risk is RiskLevel.Review or RiskLevel.Advanced);
 
     public IEnumerable<IGrouping<string, PlannedItem>> ByCategory =>

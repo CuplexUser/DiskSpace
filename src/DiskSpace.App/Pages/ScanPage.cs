@@ -160,8 +160,7 @@ public sealed class ScanPage : PageBase
             return;
         }
 
-        var quarantined = _tree.Selected.Count(f =>
-            f.Rule.Risk == RiskLevel.Review && f.Rule.Id.StartsWith("orphan.", StringComparison.Ordinal));
+        var quarantined = _tree.Selected.Count(CleanupExecutor.WouldQuarantine);
 
         _selectionSummary.Text = quarantined > 0
             ? $"{count} selected · {ByteSize.Format(_tree.SelectedSize)} · {quarantined} will be quarantined"

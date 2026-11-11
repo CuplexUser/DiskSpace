@@ -173,7 +173,7 @@ public sealed class CleanupExecutorTests
             Disposal.Delete,
             plan.Items.Single(i => i.Path == cache).Disposal);
         Assert.True(plan.ContainsQuarantine);
-        Assert.True(plan.NeedsExplicitConfirmation);
+        Assert.True(plan.GoesBeyondCaches);
     }
 
     [Fact]

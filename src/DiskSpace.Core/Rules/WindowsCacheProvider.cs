@@ -3,51 +3,25 @@ using DiskSpace.Core.Model;
 namespace DiskSpace.Core.Rules;
 
 /// <summary>
-/// Windows' own caches and temporary directories. Everything here that touches machine-wide
-/// state is marked as needing elevation, and the genuinely consequential entries — Prefetch,
-/// the component store — are rated Advanced rather than Safe.
+/// Windows caches this tool clears by path. Everything here that touches machine-wide state is
+/// marked as needing elevation, and the genuinely consequential entries are rated Advanced
+/// rather than Safe.
+///
+/// Temp directories, Delivery Optimization and the component store are not here on purpose:
+/// Windows has its own handlers for those, which <see cref="DiskCleanupProvider"/> runs. A temp
+/// directory in particular needs a per-file "has anything used this lately" test, and a rule
+/// that can only empty a whole directory cannot make it.
 /// </summary>
 public sealed class WindowsCacheProvider : IRuleProvider
 {
     public string Name => "Windows caches";
 
-    private const string Category = "Windows and system";
+    internal const string Category = "Windows and system";
 
     public IEnumerable<CleanupRule> GetRules()
     {
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var userTemp = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar);
-
-        yield return new CleanupRule
-        {
-            Id = "win.user-temp",
-            Name = "Temporary files (user)",
-            Category = Category,
-            Risk = RiskLevel.Safe,
-            Description = "Files left in your temp directory by installers and applications.",
-            WhatBreaks =
-                "Nothing, as long as no installer is mid-run. Files still in use are skipped "
-                + "and reported rather than forced.",
-            Root = userTemp,
-            Targets = [userTemp],
-            // Anything touched in the last day may belong to something still running.
-            MinimumAge = TimeSpan.FromDays(1),
-        };
-
-        yield return new CleanupRule
-        {
-            Id = "win.machine-temp",
-            Name = "Temporary files (system)",
-            Category = Category,
-            Risk = RiskLevel.Safe,
-            Description = "The machine-wide temp directory.",
-            WhatBreaks = "Nothing. Files held open by a running process are skipped.",
-            Root = Path.Combine(windows, "Temp"),
-            Targets = [Path.Combine(windows, "Temp")],
-            MinimumAge = TimeSpan.FromDays(1),
-            RequiresElevation = true,
-        };
 
         yield return new CleanupRule
         {
@@ -61,19 +35,6 @@ public sealed class WindowsCacheProvider : IRuleProvider
                 + "gigabytes on a machine that has been upgraded in place.",
             Root = Path.Combine(windows, "SoftwareDistribution", "Download"),
             Targets = [Path.Combine(windows, "SoftwareDistribution", "Download")],
-            RequiresElevation = true,
-        };
-
-        yield return new CleanupRule
-        {
-            Id = "win.delivery-optimization",
-            Name = "Delivery Optimization files",
-            Category = Category,
-            Risk = RiskLevel.Safe,
-            Description = "Update chunks cached for peer-to-peer distribution.",
-            WhatBreaks = "Nothing locally; other machines on the network lose a nearby source.",
-            Root = Path.Combine(windows, "SoftwareDistribution", "DeliveryOptimization"),
-            Targets = [Path.Combine(windows, "SoftwareDistribution", "DeliveryOptimization")],
             RequiresElevation = true,
         };
 

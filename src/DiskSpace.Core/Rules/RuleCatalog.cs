@@ -29,6 +29,7 @@ public sealed class RuleCatalog(IEnumerable<IRuleProvider>? providers = null)
         new PackageManagerCacheProvider(),
         new BrowserAndElectronProvider(),
         new WindowsCacheProvider(),
+        new DiskCleanupProvider(),
         new OrphanedAppDataProvider(),
         new LargeItemProvider(),
     ];
@@ -113,6 +114,13 @@ public sealed class RuleCatalog(IEnumerable<IRuleProvider>? providers = null)
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new RuleProgress(completed, rules.Count, rule.Name));
 
+            if (rule.Cleaner is { } cleaner)
+            {
+                var owned = await MeasureAsync(rule, cleaner, cancellationToken).ConfigureAwait(false);
+                if (owned is not null)
+                    findings.Add(owned);
+            }
+
             foreach (var target in rule.Targets)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -129,6 +137,42 @@ public sealed class RuleCatalog(IEnumerable<IRuleProvider>? providers = null)
 
         progress?.Report(new RuleProgress(rules.Count, rules.Count, "Done"));
         return findings;
+    }
+
+    /// <summary>
+    /// Measures a rule whose data a Windows component owns, by asking that component. There is
+    /// no path to walk and no file count to be had; the size is the owner's own figure.
+    /// </summary>
+    private static async Task<CleanupFinding?> MeasureAsync(
+        CleanupRule rule,
+        ISystemCleaner cleaner,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var size = await cleaner.MeasureAsync(cancellationToken).ConfigureAwait(false);
+
+            if (size is not > 0 || size < rule.MinimumSize)
+                return null;
+
+            return new CleanupFinding
+            {
+                Rule = rule,
+                Path = rule.Root,
+                Size = size.Value,
+                FileCount = 0,
+                LastWriteUtc = default,
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // A handler that cannot be asked is simply not offered.
+            return null;
+        }
     }
 
     private static async Task<CleanupFinding?> MeasureAsync(

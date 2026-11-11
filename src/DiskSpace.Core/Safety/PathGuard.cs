@@ -28,6 +28,7 @@ public sealed class PathGuard
 
     private readonly HashSet<string> _protectedExact = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _protectedTrees = [];
+    private readonly List<string> _userDataTrees = [];
     private readonly List<string> _windowsAllowlist = [];
     private readonly string _windowsDirectory;
 
@@ -49,6 +50,13 @@ public sealed class PathGuard
                      Environment.SpecialFolder.ProgramFilesX86,
                      Environment.SpecialFolder.System,
                      Environment.SpecialFolder.SystemX86,
+                 })
+        {
+            AddTree(Environment.GetFolderPath(folder));
+        }
+
+        foreach (var folder in new[]
+                 {
                      Environment.SpecialFolder.MyDocuments,
                      Environment.SpecialFolder.MyPictures,
                      Environment.SpecialFolder.MyVideos,
@@ -58,7 +66,7 @@ public sealed class PathGuard
                      Environment.SpecialFolder.Startup,
                  })
         {
-            AddTree(Environment.GetFolderPath(folder));
+            AddTree(Environment.GetFolderPath(folder), userData: true);
         }
 
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -68,7 +76,7 @@ public sealed class PathGuard
             // guessing at "old downloads" is exactly the behaviour that loses someone a file
             // they cannot get back.
             foreach (var name in new[] { "Downloads", "OneDrive", ".ssh", ".gnupg", "source", "Documents" })
-                AddTree(Path.Combine(profile, name));
+                AddTree(Path.Combine(profile, name), userData: true);
         }
     }
 
@@ -110,10 +118,35 @@ public sealed class PathGuard
         }
     }
 
-    private void AddTree(string? path)
+    private void AddTree(string? path, bool userData = false)
     {
-        if (!string.IsNullOrEmpty(path))
-            _protectedTrees.Add(Canonical(path));
+        if (string.IsNullOrEmpty(path))
+            return;
+
+        var canonical = Canonical(path);
+        _protectedTrees.Add(canonical);
+
+        if (userData)
+            _userDataTrees.Add(canonical);
+    }
+
+    /// <summary>
+    /// True when <paramref name="path"/> is inside, or contains, a folder that holds the user's
+    /// own files: Documents, Downloads, Desktop, the media libraries, keys.
+    ///
+    /// <see cref="Check"/> already refuses these for anything this tool deletes. This is for
+    /// the cleanups Windows carries out on the tool's behalf, where there is no path to check
+    /// at deletion time and the question has to be asked of what a handler says it covers.
+    /// </summary>
+    public bool TouchesUserData(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        var canonical = Canonical(path);
+
+        return _userDataTrees.Any(tree =>
+            PathCanonicalizer.IsInside(canonical, tree) || PathCanonicalizer.IsInside(tree, canonical));
     }
 
     private static string Canonical(string path)

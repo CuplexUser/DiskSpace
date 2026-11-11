@@ -6,8 +6,9 @@ removing it will cost you, and keeps a record of everything it removed.
 Three ways of looking at a full disk, in one window:
 
 - **Scan**: a catalog of things the tool knows how to reclaim: package manager caches, browser
-  and Electron caches, Windows' own temp and update caches, leftover data from uninstalled
-  software. Every finding names its consequence in plain language before you select it.
+  and Electron caches, everything Windows Disk Cleanup offers (old Windows Update files and a
+  previous Windows installation included), leftover data from uninstalled software. Every
+  finding names its consequence in plain language before you select it.
 - **Programs**: what installed software actually occupies. Registry entries, Store apps, the
   things unpacked into your profile that Windows never recorded, and the parts of Windows itself
   that no application owns. It measures and hands any removal to the program's own uninstaller.
@@ -32,6 +33,35 @@ they are about to delete matters. This one is built around that question:
   each with the correct way to deal with it (`powercfg /hibernate off`, not `del`).
 - Where a tool has its own purge command, that command is preferred over deleting files
   underneath it. A package manager knows its own index; we do not.
+
+## Everything Disk Cleanup does
+
+Some of what fills a Windows drive cannot be reclaimed by deleting files. The component store
+is the plain case: only Windows knows which of its files an update has superseded, and removing
+them by hand breaks servicing. Windows Disk Cleanup handles these through a list of handlers
+registered under `Explorer\VolumeCaches`, each a COM object that measures what it could remove
+and then removes it.
+
+DiskSpace reads that same list and hosts the same handlers (`DiskCleanupProvider`,
+`DiskCleanupHandler`). So the Scan page offers what Disk Cleanup offers, including the items
+behind its "Clean up system files" button: Windows Update cleanup, a previous Windows
+installation, temporary installation files, old driver packages, Delivery Optimization files,
+the Recycle Bin, system crash dumps. A handler added by a later version of Windows shows up
+without a change here. What DiskSpace adds is what Disk Cleanup leaves out: what removing each
+one costs you, and a risk level. Windows Update cleanup is rated `Advanced`, because afterwards
+the updates already installed can no longer be uninstalled.
+
+Three deliberate differences:
+
+- **Downloads is never offered.** Disk Cleanup can empty the Downloads folder. This tool treats
+  it as your own files, and any handler whose registration points into user folders is refused.
+- **No double counting.** Thumbnails, the DirectX shader cache and the Windows internet cache
+  are listed once, by the rule that shows their path and file count, and not again by handler.
+- **Handlers it does not recognize are rated `Review`**, never `Safe`, and say plainly that
+  DiskSpace knows nothing about them beyond the name Windows gives them.
+
+Sizes for these items are Windows' own figures. The handlers that work on system files answer
+only to an elevated process, so they do not appear in an unelevated development run.
 
 ## Measuring a whole drive
 
@@ -70,9 +100,10 @@ Bin. So the guard rails are in the code rather than in the process token:
 
 | Layer | What it does |
 | --- | --- |
-| `PathGuard` | The last check before any deletion. Protected trees (Program Files, Documents, Downloads, `.ssh`, OneDrive), a minimum path depth of four segments, and a strict allowlist for anything under `%WINDIR%`. Enforced at the deletion boundary, so no rule can opt out. |
+| `PathGuard` | The last check before any deletion. Protected trees (Program Files, Documents, Downloads, `.ssh`, OneDrive), a minimum path depth of four segments, and a strict allowlist for anything under `%WINDIR%`. Enforced at the deletion boundary, so no rule can opt out. The one thing outside it is a cleanup Windows carries out itself through a Disk Cleanup handler: there is no path to check there, so the handlers are vetted when the rules are built. |
 | `PathCanonicalizer` | Every check runs on the canonical path, not the string the caller passed, so a junction inside a cache cannot walk out into the rest of the disk. |
 | Plan / execute split | `CleanupExecutor.Plan` produces the exact list of paths; `ExecuteAsync` accepts only that object. Nothing is removed that was not first shown, and every path is re-checked immediately before it is touched. |
+| Confirmation | One dialog lists every item in the plan before anything happens, and confirms with a single click. A plan that goes beyond caches says so and its button reads Delete; keyboard focus starts on Cancel. |
 | Quarantine | Orphan findings are archived, verified and closed *before* the original is removed. Restorable for the retention period (7 days by default). |
 | Audit log | JSONL, one line per item, flushed as each item goes, so a crash halfway through still leaves a complete record. |
 | Restart Manager | Turns "the file is in use by another process" into "held by Code.exe", which is something you can act on. |
@@ -205,7 +236,8 @@ src/
     Rules/                 Providers, the rule catalog, installed-software lookup
     Programs/              Program providers, the program catalog, the uninstall handoff
     Safety/                PathGuard, PathCanonicalizer, SafeDelete
-    Cleaning/              CleanupExecutor, the audit log, Restart Manager interop
+    Cleaning/              CleanupExecutor, the audit log, Restart Manager interop,
+                           DiskCleanupHandler: hosts Windows' own Disk Cleanup handlers
     Quarantine/            Archive, restore, retention
     Settings/              AppSettings: what the app remembers between runs
     Updates/               GitHubUpdateChecker: asks GitHub for the latest release
@@ -225,7 +257,9 @@ installer/
 
 The rule catalog is where new cleanup knowledge goes: implement `IRuleProvider`, return
 `CleanupRule` records, and add it to `RuleCatalog.DefaultProviders`. Rules describe territory
-and intent. They never delete and never decide safety, which stays with `PathGuard`.
+and intent. They never delete and never decide safety, which stays with `PathGuard`. A rule for
+data that only its owner can remove names an `ISystemCleaner` instead of paths, and the owner
+does the measuring and the removing.
 
 `ProgramCatalog` works the same way for installed software: implement `IProgramProvider`, return
 `InstalledProgram` records naming where a program keeps its files, and add it to
@@ -277,7 +311,8 @@ head start. Everything else records something that actually happened.
 The suite covers the parts where a mistake is expensive: what `PathGuard` refuses, that the
 executor plans before it deletes and logs every item, that quarantine round-trips a folder and
 honors retention, and that the scanner records unreadable directories as issues rather than
-quietly understating the total.
+quietly understating the total. The Disk Cleanup hosting is tested against Windows' real
+data-driven cleaner, registered under a throwaway key and pointed at a fixture folder.
 
 Three of them are load-bearing enough to name:
 

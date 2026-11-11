@@ -27,6 +27,7 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null, string? 
     /// <summary>
     /// Decides how each finding will be disposed of. Orphaned application data is quarantined —
     /// its detection is a heuristic — while caches, which regenerate, are deleted outright.
+    /// Data a Windows component owns is left to that component.
     /// </summary>
     public CleanupPlan Plan(IEnumerable<CleanupFinding> selected)
     {
@@ -35,15 +36,22 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null, string? 
             .Select(finding => new PlannedItem
             {
                 Finding = finding,
-                Disposal = ShouldQuarantine(finding) ? Disposal.Quarantine : Disposal.Delete,
+                Disposal = finding.Rule.Cleaner is not null ? Disposal.Windows
+                    : WouldQuarantine(finding) ? Disposal.Quarantine
+                    : Disposal.Delete,
             })
             .ToList();
 
         return new CleanupPlan { Items = items };
     }
 
-    private static bool ShouldQuarantine(CleanupFinding finding) =>
-        finding.Rule.Risk == RiskLevel.Review
+    /// <summary>
+    /// Whether a finding is staged for restore instead of deleted. Public so the UI describes
+    /// a finding with the same test the plan will apply to it.
+    /// </summary>
+    public static bool WouldQuarantine(CleanupFinding finding) =>
+        finding.Rule.Cleaner is null
+        && finding.Rule.Risk == RiskLevel.Review
         && finding.Rule.RemoveTargetDirectory
         && finding.Rule.Id.StartsWith("orphan.", StringComparison.Ordinal);
 
@@ -93,7 +101,14 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null, string? 
         foreach (var item in plan.Items)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            progress?.Report(new CleanupProgress(completed, plan.Items.Count, reclaimed, item.Path));
+            // A Windows-owned item has a label where its path would be, and can run for
+            // minutes, so it is reported by name.
+            progress?.Report(new CleanupProgress(
+                completed,
+                plan.Items.Count,
+                reclaimed,
+                item.Path,
+                item.Disposal == Disposal.Windows ? $"Windows is removing {item.Rule.Name}" : null));
 
             var outcome = await DisposeItemAsync(item, ItemDetail(item), cancellationToken)
                 .ConfigureAwait(false);
@@ -130,6 +145,9 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null, string? 
         IProgress<QuarantineProgress>? archiveProgress,
         CancellationToken cancellationToken)
     {
+        if (item.Rule.Cleaner is { } cleaner)
+            return await RunCleanerAsync(item, cleaner, cancellationToken).ConfigureAwait(false);
+
         // Re-validated here, not trusted from planning time. Between preview and execution the
         // filesystem can change underneath us, and this is the only check that matters.
         var verdict = _guard.Check(item.Path, item.Rule.Root);
@@ -190,6 +208,44 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null, string? 
                 Disposal = item.Disposal,
                 Error = ex.Message,
                 HeldBy = RestartManager.DescribeLockers(item.Path),
+            };
+        }
+    }
+
+    /// <summary>
+    /// Hands the item to the Windows component that owns it. The path guard is not consulted,
+    /// because nothing is deleted by path here: the item's path is a label, and what goes is
+    /// decided by Windows' own code. Which components may be asked at all is settled earlier,
+    /// when the rules are built.
+    /// </summary>
+    private static async Task<CleanupOutcome> RunCleanerAsync(
+        PlannedItem item, ISystemCleaner cleaner, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var reclaimed = await cleaner.CleanAsync(null, cancellationToken).ConfigureAwait(false);
+
+            return new CleanupOutcome
+            {
+                Path = item.Path,
+                Succeeded = true,
+                BytesReclaimed = reclaimed,
+                Disposal = Disposal.Windows,
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new CleanupOutcome
+            {
+                Path = item.Path,
+                Succeeded = false,
+                BytesReclaimed = 0,
+                Disposal = Disposal.Windows,
+                Error = $"{item.Rule.Name}: {ex.Message}",
             };
         }
     }

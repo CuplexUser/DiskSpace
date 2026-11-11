@@ -10,16 +10,13 @@ namespace DiskSpace.App.Dialogs;
 /// <summary>
 /// The last thing between a selection and permanent deletion.
 ///
-/// Shows every path, grouped, with no summarising away of the detail. A selection of nothing but
-/// caches confirms in a single click; anything rated Review or Advanced requires typing DELETE,
-/// because there is no Recycle Bin behind this and no undo.
+/// Shows every path, grouped, with no summarizing away of the detail, and confirms in a single
+/// click. A selection that goes beyond caches says so above the buttons and turns the confirm
+/// button into a destructive one, because there is no Recycle Bin behind this and no undo.
 /// </summary>
 public sealed class CleanupConfirmDialog : Form
 {
-    private const string ConfirmWord = "DELETE";
-
     private readonly CleanupPlan _plan;
-    private readonly TextBox _confirmBox = new();
     private readonly AccentButton _confirmButton = new();
     private readonly AccentButton _cancelButton = new();
     private readonly ListBox _paths = new();
@@ -44,7 +41,7 @@ public sealed class CleanupConfirmDialog : Form
 
         BuildLayout();
         ApplyTheme();
-        UpdateConfirmState();
+        DescribePlan();
     }
 
     private void BuildLayout()
@@ -66,9 +63,8 @@ public sealed class CleanupConfirmDialog : Form
 
             foreach (var item in group.OrderByDescending(i => i.Size))
             {
-                var disposal = item.Disposal == Disposal.Quarantine ? "quarantine" : "delete";
                 _paths.Items.Add(new PathRow(
-                    $"    [{disposal}] {item.Path}  ({ByteSize.Format(item.Size)})",
+                    $"    {DescribeItem(item)}  ({ByteSize.Format(item.Size)})",
                     IsHeading: false,
                     item.Risk));
             }
@@ -80,17 +76,11 @@ public sealed class CleanupConfirmDialog : Form
         var footer = new Panel { Dock = DockStyle.Bottom, Height = 96 };
 
         _prompt.AutoSize = false;
-        // Full dialog width: the prompt names the confirmation word, so clipping it
-        // would hide the instruction the button depends on.
+        // Full dialog width: the prompt is the only warning left on this dialog, so clipping
+        // it would hide the one thing the button depends on being read.
         _prompt.Bounds = new Rectangle(18, 8, ClientSize.Width - 36, 22);
         _prompt.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _prompt.Font = AppTheme.UiFont;
-
-        _confirmBox.Bounds = new Rectangle(18, 34, 160, 26);
-        _confirmBox.BorderStyle = BorderStyle.FixedSingle;
-        _confirmBox.Font = AppTheme.UiFont;
-        _confirmBox.TextChanged += (_, _) => UpdateConfirmState();
-        _confirmBox.Visible = _plan.NeedsExplicitConfirmation;
 
         const int Margin = 18;
         const int Gap = 10;
@@ -103,7 +93,6 @@ public sealed class CleanupConfirmDialog : Form
         _cancelButton.Size = new Size(CancelWidth, ButtonHeight);
         _cancelButton.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
 
-        _confirmButton.Kind = ButtonKind.Danger;
         _confirmButton.Size = new Size(ConfirmWidth, ButtonHeight);
         _confirmButton.Click += (_, _) => { DialogResult = DialogResult.OK; Close(); };
 
@@ -119,7 +108,7 @@ public sealed class CleanupConfirmDialog : Form
         }
 
         footer.Resize += (_, _) => PositionButtons();
-        footer.Controls.AddRange([_prompt, _confirmBox, _cancelButton, _confirmButton]);
+        footer.Controls.AddRange([_prompt, _cancelButton, _confirmButton]);
         PositionButtons();
 
         Controls.Add(listHost);
@@ -129,6 +118,17 @@ public sealed class CleanupConfirmDialog : Form
         CancelButton = null;
         AcceptButton = null;
     }
+
+    /// <summary>
+    /// One line per item. Something Windows removes itself is listed by name, since its
+    /// location is a description of where the data lives and not a path this tool will delete.
+    /// </summary>
+    private static string DescribeItem(PlannedItem item) => item.Disposal switch
+    {
+        Disposal.Quarantine => $"[quarantine] {item.Path}",
+        Disposal.Windows => $"[windows] {item.Rule.Name}: {item.Path}",
+        _ => $"[delete] {item.Path}",
+    };
 
     private void DrawPathItem(object? sender, DrawItemEventArgs e)
     {
@@ -157,30 +157,26 @@ public sealed class CleanupConfirmDialog : Form
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
     }
 
-    private void UpdateConfirmState()
+    private void DescribePlan()
     {
         var palette = AppTheme.Current;
 
-        if (!_plan.NeedsExplicitConfirmation)
+        if (!_plan.GoesBeyondCaches)
         {
             _prompt.Text = "These are caches that regenerate on demand.";
             _prompt.ForeColor = palette.TextMuted;
             _confirmButton.Text = "Clean";
             _confirmButton.Kind = ButtonKind.Primary;
-            _confirmButton.Enabled = true;
             return;
         }
 
-        var matches = string.Equals(_confirmBox.Text.Trim(), ConfirmWord, StringComparison.Ordinal);
-
         _prompt.Text = _plan.ContainsQuarantine
-            ? $"This selection includes items that are not simple caches. Type {ConfirmWord} to continue."
-            : $"Deletion is permanent. There is no Recycle Bin. Type {ConfirmWord} to continue.";
+            ? "This selection includes items that are not simple caches."
+            : "Deletion is permanent. There is no Recycle Bin.";
         _prompt.ForeColor = palette.RiskReview;
 
         _confirmButton.Text = "Delete";
         _confirmButton.Kind = ButtonKind.Danger;
-        _confirmButton.Enabled = matches;
     }
 
     private void ApplyTheme()
@@ -190,8 +186,6 @@ public sealed class CleanupConfirmDialog : Form
         BackColor = palette.Bg;
         _paths.BackColor = palette.Surface;
         _paths.ForeColor = palette.Text;
-        _confirmBox.BackColor = palette.SurfaceAlt;
-        _confirmBox.ForeColor = palette.Text;
 
         foreach (Control control in Controls)
             control.BackColor = palette.Bg;
@@ -202,6 +196,27 @@ public sealed class CleanupConfirmDialog : Form
         base.OnHandleCreated(e);
         NativeMethods.ApplyTitleBarTheme(Handle, AppTheme.Current.IsDark);
         NativeMethods.ApplyExplorerTheme(_paths.Handle, AppTheme.Current.IsDark);
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+
+        // With no typed confirmation, a stray Enter or Space must not be what deletes: the
+        // keyboard starts on Cancel, and confirming takes a deliberate click or Tab.
+        _cancelButton.Focus();
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Escape)
+        {
+            DialogResult = DialogResult.Cancel;
+            Close();
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     private sealed record PathRow(string Text, bool IsHeading, RiskLevel Risk)
@@ -235,9 +250,20 @@ public sealed class CleanupConfirmDialog : Form
                 g, summary, AppTheme.UiFont,
                 new Point(18, 46), palette.TextMuted, TextFormatFlags.NoPrefix);
 
-            TextRenderer.DrawText(
-                g, $"{ByteSize.Count(plan.TotalFileCount)} files", AppTheme.UiFontSmall,
-                new Point(18, 68), palette.TextFaint, TextFormatFlags.NoPrefix);
+            // Windows does not say how many files its own cleanups cover, so the count is of
+            // the files this tool walked, and is left out when there are none.
+            if (plan.TotalFileCount > 0)
+            {
+                var windowsOwned = plan.Items.Count(i => i.Disposal == Disposal.Windows);
+
+                var files = windowsOwned > 0
+                    ? $"{ByteSize.Count(plan.TotalFileCount)} files, plus {windowsOwned} item(s) Windows removes itself"
+                    : $"{ByteSize.Count(plan.TotalFileCount)} files";
+
+                TextRenderer.DrawText(
+                    g, files, AppTheme.UiFontSmall,
+                    new Point(18, 68), palette.TextFaint, TextFormatFlags.NoPrefix);
+            }
 
             using var pen = new Pen(palette.Border);
             g.DrawLine(pen, 0, Height - 1, Width, Height - 1);
