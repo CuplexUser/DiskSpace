@@ -138,6 +138,7 @@ public sealed class ScanPage : PageBase
         _tree.Dock = DockStyle.Fill;
         _tree.SelectionChanged += (_, _) => UpdateSelectionSummary();
         _tree.FindingHighlighted += (_, finding) => _detail.Show(finding);
+        _detail.ActionRequested += async (_, finding) => await RunActionAsync(finding);
 
         _split.Panel1.Controls.Add(_tree);
         _split.Panel2.Controls.Add(_detail);
@@ -287,6 +288,82 @@ public sealed class ScanPage : PageBase
     }
 
     /// <summary>
+    /// Runs the action offered beside a finding, such as turning hibernation off, after the
+    /// person has read what it costs. The outcome goes to the status line and the audit log,
+    /// and a success is followed by a rescan, since the thing the finding measured has changed.
+    /// </summary>
+    private async Task RunActionAsync(CleanupFinding finding)
+    {
+        if (IsBusy || finding.Rule.Action is not { } action)
+            return;
+
+        using (var dialog = new ActionConfirmDialog(finding, action))
+        {
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
+        }
+
+        _cancellation = new CancellationTokenSource();
+        SetBusy(true, "Scan");
+        _progress.Start();
+        _status.Text = $"{action.Label}: {finding.Rule.Name}. This can take a few minutes.";
+
+        ActionResult result;
+
+        try
+        {
+            result = await action.RunAsync(_cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            result = new ActionResult(false, $"{action.Label} was cancelled.");
+        }
+        catch (Exception ex)
+        {
+            result = new ActionResult(false, $"{action.Label} failed: {ex.Message}");
+        }
+        finally
+        {
+            _cancellation.Dispose();
+            _cancellation = null;
+            SetBusy(false, "Scan");
+        }
+
+        RecordAction(finding, action, result);
+
+        if (result.Succeeded)
+        {
+            await ToggleScanAsync();
+        }
+
+        // Set after the rescan, whose own summary would otherwise replace it before it is read.
+        _status.Text = result.Message;
+        _status.ForeColor = result.Succeeded ? AppTheme.Current.RiskSafe : AppTheme.Current.RiskAdvanced;
+    }
+
+    /// <summary>
+    /// An action changes the system as surely as a cleanup does, so it goes in the same log,
+    /// with the space it freed as measured afterwards.
+    /// </summary>
+    private static void RecordAction(CleanupFinding finding, RuleAction action, ActionResult result)
+    {
+        using var log = AuditLog.StartRun();
+
+        log.Write(new AuditEntry
+        {
+            Timestamp = DateTimeOffset.Now,
+            Path = finding.Path,
+            Bytes = result.BytesReclaimed,
+            RuleId = finding.Rule.Id,
+            RuleName = $"{finding.Rule.Name}: {action.Label}",
+            Risk = finding.Rule.Risk.ToString(),
+            Disposal = "Action",
+            Succeeded = result.Succeeded,
+            Error = result.Succeeded ? null : result.Message,
+        });
+    }
+
+    /// <summary>
     /// What the run is doing right now: the file-level detail when there is one, otherwise the
     /// item being worked on. Naming it matters more than the count does, because one item can
     /// occupy the whole run.
@@ -331,6 +408,7 @@ public sealed class ScanPage : PageBase
         _scanButton.Text = busy ? "Cancel" : scanLabel;
         _scanButton.Kind = busy ? ButtonKind.Danger : ButtonKind.Primary;
         _cleanButton.Enabled = !busy && _tree.Selected.Count > 0;
+        _detail.ActionsEnabled = !busy;
         UpdatePresets();
         _status.ForeColor = AppTheme.Current.TextMuted;
     }

@@ -84,6 +84,8 @@ public sealed class MainForm : Form
 
         Register("explorer", "Explorer", Glyphs.Folder, () => new ExplorerPage(_cache, _settings));
 
+        Register("files", "Files", Glyphs.Files, () => new FilesPage());
+
         Register("quarantine", "Quarantine", Glyphs.Quarantine, () =>
         {
             var page = new QuarantinePage(_quarantine);

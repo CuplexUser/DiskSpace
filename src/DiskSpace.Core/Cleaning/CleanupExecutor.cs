@@ -51,9 +51,10 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null, string? 
     /// </summary>
     public static bool WouldQuarantine(CleanupFinding finding) =>
         finding.Rule.Cleaner is null
-        && finding.Rule.Risk == RiskLevel.Review
-        && finding.Rule.RemoveTargetDirectory
-        && finding.Rule.Id.StartsWith("orphan.", StringComparison.Ordinal);
+        && (finding.Rule.Quarantine
+            || (finding.Rule.Risk == RiskLevel.Review
+                && finding.Rule.RemoveTargetDirectory
+                && finding.Rule.Id.StartsWith("orphan.", StringComparison.Ordinal)));
 
     public async Task<CleanupReport> ExecuteAsync(
         CleanupPlan plan,
@@ -259,8 +260,58 @@ public sealed class CleanupExecutor(QuarantineStore? quarantine = null, string? 
         if (File.Exists(item.Path))
             return SafeDelete.DeleteFile(item.Path);
 
-        return Directory.Exists(item.Path)
-            ? SafeDelete.DeleteDirectory(item.Path, item.Rule.RemoveTargetDirectory, cancellationToken)
-            : 0;
+        if (!Directory.Exists(item.Path))
+            return 0;
+
+        if (item.Rule.MinimumAge is { } age)
+            return SafeDelete.DeleteOlderThan(item.Path, DateTime.UtcNow - age, cancellationToken);
+
+        // The tool goes first, so that its index is told about what it removes. Whatever it
+        // leaves in the folder, or all of it when the tool is not installed, is then deleted
+        // the ordinary way: the folder was shown and approved, and it is emptied either way.
+        var byTool = item.Rule.Purge is { } purge ? RunPurge(purge, item.Path, cancellationToken) : 0;
+
+        return byTool + SafeDelete.DeleteDirectory(item.Path, item.Rule.RemoveTargetDirectory, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs a tool's own cache-clearing command against <paramref name="path"/> and returns
+    /// what that freed, measured as the difference in the folder's size across the run. A tool
+    /// that fails or is missing simply frees nothing here.
+    /// </summary>
+    private static long RunPurge(PurgeCommand purge, string path, CancellationToken cancellationToken)
+    {
+        if (ToolRunner.FindOnPath(purge.Executable) is null)
+            return 0;
+
+        var before = SizeOf(path);
+
+        ToolRunner.Run(
+            purge.Executable,
+            purge.ArgumentsFor(path),
+            purge.EnvironmentFor(path),
+            timeout: null,
+            cancellationToken);
+
+        return Math.Max(0, before - SizeOf(path));
+    }
+
+    private static long SizeOf(string path)
+    {
+        try
+        {
+            return new DirectoryInfo(path)
+                .EnumerateFiles("*", new EnumerationOptions
+                {
+                    RecurseSubdirectories = true,
+                    IgnoreInaccessible = true,
+                    AttributesToSkip = FileAttributes.ReparsePoint,
+                })
+                .Sum(file => file.Length);
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
     }
 }

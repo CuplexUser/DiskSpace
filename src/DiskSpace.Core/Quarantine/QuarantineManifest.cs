@@ -22,6 +22,12 @@ public sealed record QuarantineManifest
     /// <summary>Set when the folder was moved aside on the same volume instead of archived.</summary>
     public string? MovedToPath { get; init; }
 
+    /// <summary>
+    /// Set when the item was a single file. Absent from manifests written before files could
+    /// be quarantined, which reads back as false, and all of those were folders.
+    /// </summary>
+    public bool IsFile { get; init; }
+
     public bool IsArchive => MovedToPath is null;
 
     public bool IsDue(DateTimeOffset now) => now >= PurgeAfter;

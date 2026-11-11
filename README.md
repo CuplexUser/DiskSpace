@@ -3,7 +3,7 @@
 A disk reclamation tool for Windows. It finds space you can actually get back, tells you what
 removing it will cost you, and keeps a record of everything it removed.
 
-Three ways of looking at a full disk, in one window:
+Four ways of looking at a full disk, in one window:
 
 - **Scan**: a catalog of things the tool knows how to reclaim: package manager caches, browser
   and Electron caches, everything Windows Disk Cleanup offers (old Windows Update files and a
@@ -16,6 +16,10 @@ Three ways of looking at a full disk, in one window:
   actually eating my disk?* No rules involved, so it can see what the catalog cannot. It paints
   the first levels of a whole drive in about a quarter of a second and fills in the rest while
   you look at it.
+- **Files**: single files, which the other three never name. The largest files under a folder,
+  optionally only those nobody has modified in months or years, and the files that exist more
+  than once. These are your own files, so this page never deletes: it sends what you pick to the
+  Recycle Bin.
 
 ## Why another cleaner
 
@@ -30,8 +34,9 @@ they are about to delete matters. This one is built around that question:
   `Advanced` affects system state. `ReportOnly` is surfaced but never touched, so the disk
   arithmetic still adds up once every cache is gone.
 - Large things it refuses to delete (`hiberfil.sys`, the component store) are still listed,
-  each with the correct way to deal with it (`powercfg /hibernate off`, not `del`).
-- Where a tool has its own purge command, that command is preferred over deleting files
+  each with the correct way to deal with it (`powercfg /hibernate off`, not `del`). Where that
+  way is one click, the finding offers it as a button, behind a dialog that says what it costs.
+- Where a tool has its own purge command, that command is run before anything is deleted
   underneath it. A package manager knows its own index; we do not.
 
 ## Everything Disk Cleanup does
@@ -62,6 +67,48 @@ Three deliberate differences:
 
 Sizes for these items are Windows' own figures. The handlers that work on system files answer
 only to an elevated process, so they do not appear in an unelevated development run.
+
+## Beyond deleting folders
+
+- **Package managers clear their own caches.** npm, Yarn, pip, uv, NuGet and Go each have a
+  purge command, and it runs first; whatever it leaves behind is deleted after it, and both
+  halves are counted. Every command is pinned to the folder the finding shows (`--cache
+  <folder>`, or `NUGET_PACKAGES=<folder>` and its kin), because a bare `npm cache clean` clears
+  whichever cache npm is configured to use, which need not be the one on screen. These are
+  programs from your PATH, so they never run with the app's administrator rights: an elevated
+  DiskSpace starts them with the token of your desktop session instead (`ToolRunner`). A tool
+  that is not installed, fails or overruns ten minutes simply leaves the folder to the delete.
+- **Temp folders are cleaned file by file.** Something in `%TEMP%` is always a minute old and in
+  use, so the rule takes only files whose creation *and* modification are both more than a day
+  in the past. Checking both matters: a file copied in a minute ago keeps its source's old write
+  time. Folders it empties go too, if they are old themselves; the temp folder itself stays.
+- **Orphaned Windows Installer packages.** `%WINDIR%\Installer` keeps a copy of every `.msi` and
+  `.msp` ever installed, so that products can be repaired and patched. The ones no installed
+  product or patch refers to any more are offered, rated `Review` and quarantined, never deleted
+  outright. The list of what is still referenced comes from Windows Installer itself, for every
+  user on the machine. If that question cannot be answered in full (unelevated, it cannot), or a
+  package arrived in the last week, nothing is offered: a wrong answer here breaks the uninstall
+  of something still installed.
+- **One-click actions for things that are not files to delete.** Turning hibernation off
+  (`powercfg /hibernate off`), compacting a WSL or Docker virtual disk (shuts WSL down, then
+  `diskpart compact vdisk`), and removing all but the newest System Restore point (through
+  System Restore's own API). Each runs only after a dialog that spells out the consequence, is
+  measured on disk afterwards, and goes in the audit log like any other removal.
+
+## Large, old and duplicate files
+
+The Files page lists the largest files under a folder, largest first, sortable by any column,
+with a filter for files untouched for six months, a year or two years. It also finds files with
+identical contents: candidates are narrowed by size, then by a hash of their first and last
+64 KB, and only the survivors are read in full and compared by SHA-256. Hard links to one file
+are recognized as one file, since a second name for the same data wastes nothing. The duplicate
+search skips the Windows folder, cloud files that are not on this disk, and anything behind a
+junction.
+
+Removing is deliberately modest. Files go to the Recycle Bin, so a mistake can be undone; a file
+under Windows or Program Files, or one Windows marks as a system file, is refused; and a
+duplicate set with every copy selected is refused too. **Select all but the oldest** selects
+every copy except the earliest in each set, the one most likely to be the original.
 
 ## Measuring a whole drive
 
@@ -95,8 +142,9 @@ gets wrong, and anything adopted under it keeps the `≈` for the rest of the sc
 
 ## Safety model
 
-The app runs elevated for its whole lifetime, deletes permanently, and does not use the Recycle
-Bin. So the guard rails are in the code rather than in the process token:
+The app runs elevated for its whole lifetime and deletes permanently. The Recycle Bin is used in
+one place only, the Files page, where you pick your own files by hand. So the guard rails are in
+the code rather than in the process token:
 
 | Layer | What it does |
 | --- | --- |
@@ -232,20 +280,23 @@ src/
     Scanning/              DirectoryReader: the one directory walker, shared by both scanners
                            FastDirectoryScanner: measures a tree and returns once
                            ProgressiveScanner: publishes the tree and keeps filling it in
+                           FileSurvey: large files and duplicates, read-only
     Caching/               Remembered scans: the binary tree file, the index, eviction
-    Rules/                 Providers, the rule catalog, installed-software lookup
+    Rules/                 Providers, the rule catalog, installed-software lookup,
+                           SystemActions: hibernation, virtual disks, restore points
     Programs/              Program providers, the program catalog, the uninstall handoff
-    Safety/                PathGuard, PathCanonicalizer, SafeDelete
+    Safety/                PathGuard, PathCanonicalizer, SafeDelete, RecycleBin
     Cleaning/              CleanupExecutor, the audit log, Restart Manager interop,
                            DiskCleanupHandler: hosts Windows' own Disk Cleanup handlers
+                           ToolRunner: runs package managers' purge commands unelevated
     Quarantine/            Archive, restore, retention
     Settings/              AppSettings: what the app remembers between runs
     Updates/               GitHubUpdateChecker: asks GitHub for the latest release
     Model/                 ByteSize, RiskLevel
   DiskSpace.App/           WinForms, laid out in code, no designer files
-    Pages/                 Scan, Programs, Explorer, Quarantine, Log, Settings
+    Pages/                 Scan, Programs, Explorer, Files, Quarantine, Log, Settings
     Controls/              Treemap, size tree, findings tree, nav rail, progress strip
-    Dialogs/               Cleanup confirmation, update-available prompt
+    Dialogs/               Cleanup and action confirmations, update-available prompt
     Theme/                 Palette, fonts, glyphs, window icon; follows the Windows light/dark setting
     Updates/               AppUpdateManager: throttling and the skip/remind decision
     Assets/                DiskSpace.ico, shared by the executable, its windows and the installer
@@ -312,7 +363,10 @@ The suite covers the parts where a mistake is expensive: what `PathGuard` refuse
 executor plans before it deletes and logs every item, that quarantine round-trips a folder and
 honors retention, and that the scanner records unreadable directories as issues rather than
 quietly understating the total. The Disk Cleanup hosting is tested against Windows' real
-data-driven cleaner, registered under a throwaway key and pointed at a fixture folder.
+data-driven cleaner, registered under a throwaway key and pointed at a fixture folder. Purge
+commands are tested with a stand-in `.cmd` tool that records which folder it was handed, the
+installer cache mostly for the cases where nothing may be offered, and the duplicate finder
+with files that differ only in their middle byte and with hard links.
 
 Three of them are load-bearing enough to name:
 

@@ -30,6 +30,7 @@ public sealed class RuleCatalog(IEnumerable<IRuleProvider>? providers = null)
         new BrowserAndElectronProvider(),
         new WindowsCacheProvider(),
         new DiskCleanupProvider(),
+        new InstallerCacheProvider(),
         new OrphanedAppDataProvider(),
         new LargeItemProvider(),
     ];
@@ -215,6 +216,13 @@ public sealed class RuleCatalog(IEnumerable<IRuleProvider>? providers = null)
             if (!Directory.Exists(target))
                 return null;
 
+            if (rule.MinimumAge is { } age)
+            {
+                return await Task
+                    .Run(() => MeasureOlderThan(rule, target, DateTime.UtcNow - age, cancellationToken), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             var result = await scanner.ScanAsync(target, null, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -222,9 +230,6 @@ public sealed class RuleCatalog(IEnumerable<IRuleProvider>? providers = null)
                 return null;
 
             if (result.TotalSize < rule.MinimumSize)
-                return null;
-
-            if (TooRecent(rule, result.Root.LastWriteUtc))
                 return null;
 
             return new CleanupFinding
@@ -245,6 +250,46 @@ public sealed class RuleCatalog(IEnumerable<IRuleProvider>? providers = null)
             // An unreadable target is simply not offered.
             return null;
         }
+    }
+
+    /// <summary>
+    /// Measures only the files a rule with a minimum age would take, using the same walk the
+    /// deletion uses, so the figure offered is the figure removed.
+    /// </summary>
+    private static CleanupFinding? MeasureOlderThan(
+        CleanupRule rule, string target, DateTime cutoffUtc, CancellationToken cancellationToken)
+    {
+        long size = 0;
+        long files = 0;
+        var newest = default(DateTime);
+
+        foreach (var file in SafeDelete.EnumerateOlderThan(target, cutoffUtc, cancellationToken))
+        {
+            try
+            {
+                size += file.Length;
+                files++;
+
+                if (file.LastWriteTimeUtc > newest)
+                    newest = file.LastWriteTimeUtc;
+            }
+            catch (Exception)
+            {
+                // Gone or unreadable since it was listed; it is not counted.
+            }
+        }
+
+        if (files == 0 || size < rule.MinimumSize)
+            return null;
+
+        return new CleanupFinding
+        {
+            Rule = rule,
+            Path = target,
+            Size = size,
+            FileCount = files,
+            LastWriteUtc = newest,
+        };
     }
 
     private static bool TooRecent(CleanupRule rule, DateTime lastWriteUtc) =>

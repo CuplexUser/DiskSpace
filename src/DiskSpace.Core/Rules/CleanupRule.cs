@@ -44,8 +44,26 @@ public sealed record CleanupRule
     /// </summary>
     public bool RemoveTargetDirectory { get; init; }
 
-    /// <summary>Only touch items untouched for at least this long.</summary>
+    /// <summary>
+    /// Only take files untouched for at least this long, judged one file at a time. A temp
+    /// directory always holds something written a minute ago, so a test on the directory as a
+    /// whole would never let it be cleaned at all. With this set the target directory is
+    /// never removed, only thinned.
+    /// </summary>
     public TimeSpan? MinimumAge { get; init; }
+
+    /// <summary>
+    /// Stage what this rule removes where it can be restored, instead of deleting it. For
+    /// findings that rest on inference, where being wrong shows up weeks later.
+    /// </summary>
+    public bool Quarantine { get; init; }
+
+    /// <summary>
+    /// Something the user can do about a finding this tool will not remove: turn a feature
+    /// off, compact a disk image. Offered as a button beside the finding, never run by a scan
+    /// or a cleanup.
+    /// </summary>
+    public RuleAction? Action { get; init; }
 
     /// <summary>Ignore findings smaller than this. Keeps byte-sized noise out of the results.</summary>
     public long MinimumSize { get; init; }
@@ -84,10 +102,46 @@ public interface ISystemCleaner
     Task<long> CleanAsync(IProgress<long>? progress = null, CancellationToken cancellationToken = default);
 }
 
-/// <summary>A tool's own cache-clearing command, e.g. <c>npm cache clean --force</c>.</summary>
-public sealed record PurgeCommand(string Executable, string Arguments)
+/// <summary>
+/// A tool's own cache-clearing command, e.g. <c>npm cache clean --force</c>.
+///
+/// The command is pinned to the folder the rule lists, either by <c>{path}</c> in
+/// <paramref name="Arguments"/> or by setting <paramref name="PathVariable"/> in the tool's
+/// environment. Without that a tool clears wherever its own configuration points, which need
+/// not be the folder that was shown and approved.
+/// </summary>
+public sealed record PurgeCommand(string Executable, string Arguments, string? PathVariable = null)
 {
-    public override string ToString() => $"{Executable} {Arguments}";
+    private const string PathToken = "{path}";
+
+    /// <summary>The arguments as run against <paramref name="target"/>.</summary>
+    public string ArgumentsFor(string target) =>
+        Arguments.Replace(PathToken, $"\"{target.TrimEnd(Path.DirectorySeparatorChar)}\"", StringComparison.Ordinal);
+
+    /// <summary>The environment the tool is given so that it works on <paramref name="target"/>.</summary>
+    public IReadOnlyDictionary<string, string>? EnvironmentFor(string target) =>
+        PathVariable is null ? null : new Dictionary<string, string> { [PathVariable] = target };
+
+    public override string ToString() =>
+        $"{Executable} {Arguments.Replace(PathToken, "<this folder>", StringComparison.Ordinal)}";
+}
+
+/// <summary>
+/// What <see cref="RuleAction.RunAsync"/> reports back: in words for the status line, and the
+/// space it freed, measured on disk, for the audit log.
+/// </summary>
+public readonly record struct ActionResult(bool Succeeded, string Message, long BytesReclaimed = 0);
+
+/// <summary>An action offered beside a finding. See <see cref="CleanupRule.Action"/>.</summary>
+public sealed record RuleAction
+{
+    /// <summary>The button text, e.g. "Turn off hibernation".</summary>
+    public required string Label { get; init; }
+
+    /// <summary>What it does and what it costs, shown before it runs.</summary>
+    public required string Consequence { get; init; }
+
+    public required Func<CancellationToken, Task<ActionResult>> RunAsync { get; init; }
 }
 
 /// <summary>One resolved, measured item a rule proposes to remove.</summary>

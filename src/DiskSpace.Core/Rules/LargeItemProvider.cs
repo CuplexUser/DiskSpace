@@ -21,14 +21,58 @@ public sealed class LargeItemProvider : IRuleProvider
                      ?? @"C:\";
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
+        var hibernationFile = Path.Combine(system, "hiberfil.sys");
+
         yield return Report(
             "hiberfil",
             "Hibernation file",
-            Path.Combine(system, "hiberfil.sys"),
+            hibernationFile,
             "Memory contents saved when the machine hibernates, sized after installed RAM.",
             "Deleting this file directly is not possible and would break hibernation and fast "
             + "startup. To reclaim it, disable hibernation: run `powercfg /hibernate off` from "
-            + "an elevated prompt.");
+            + "an elevated prompt.") with
+        {
+            Action = new RuleAction
+            {
+                Label = "Turn off hibernation",
+                Consequence =
+                    "This runs powercfg /hibernate off, which removes hiberfil.sys.\n\n"
+                    + "The PC can no longer hibernate, and Fast Startup stops working, so a cold "
+                    + "boot takes a little longer. Sleep is not affected. On a laptop, hibernation "
+                    + "is what saves your work when the battery runs out while asleep.\n\n"
+                    + "To undo it, run powercfg /hibernate on.",
+                RunAsync = token => SystemActions.TurnOffHibernationAsync(hibernationFile, token),
+            },
+        };
+
+        var restorePoints = new RestorePointStorage();
+
+        yield return new CleanupRule
+        {
+            Id = "large.restore-points",
+            Name = "System Restore and shadow copies",
+            Category = Category,
+            Risk = RiskLevel.ReportOnly,
+            Description =
+                "Restore points and other volume shadow copies. They hold earlier versions of "
+                + "system files so that a bad driver or update can be rolled back.",
+            WhatBreaks =
+                "Each restore point removed is a moment you can no longer roll the system back "
+                + "to. The newest one is the one that matters, and it is always kept.",
+            Root = Path.Combine(system, "System Volume Information"),
+            Targets = [],
+            RequiresElevation = true,
+            Cleaner = restorePoints,
+            Action = new RuleAction
+            {
+                Label = "Delete older restore points",
+                Consequence =
+                    "This removes every restore point except the most recent one.\n\n"
+                    + "You will only be able to roll the system back to that newest point. "
+                    + "This cannot be undone.",
+                RunAsync = restorePoints.KeepOnlyNewestAsync,
+            },
+        };
 
         yield return Report(
             "pagefile",
@@ -91,7 +135,20 @@ public sealed class LargeItemProvider : IRuleProvider
                 "Deleting it destroys that distribution or all Docker data. Reclaim space "
                 + "inside it instead (`docker system prune -a` for Docker), then compact the "
                 + "disk with `wsl --manage <distro> --set-sparse true`, or `Optimize-VHD "
-                + "-Mode Full` on a stopped VM.");
+                + "-Mode Full` on a stopped VM.") with
+            {
+                Action = new RuleAction
+                {
+                    Label = "Compact this disk",
+                    Consequence =
+                        "This shuts down WSL, then has diskpart release the space inside the disk "
+                        + "that its contents no longer use. Nothing inside the disk is deleted.\n\n"
+                        + "Every running WSL distribution and every Docker container stops. Quit "
+                        + "Docker Desktop first, and save any work in open Linux sessions.\n\n"
+                        + "It can take several minutes and cannot be interrupted once started.",
+                    RunAsync = token => SystemActions.CompactVirtualDiskAsync(path, token),
+                },
+            };
         }
     }
 

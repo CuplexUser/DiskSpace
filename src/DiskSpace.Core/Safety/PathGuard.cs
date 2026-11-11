@@ -111,6 +111,9 @@ public sealed class PathGuard
                      "Prefetch",
                      @"Logs\CBS",
                      "Downloaded Program Files",
+                     // Cached installer packages. Only ever proposed one file at a time, and
+                     // only files Windows Installer has no registration for.
+                     "Installer",
                      @"ServiceProfiles\LocalService\AppData\Local\Temp",
                  })
         {

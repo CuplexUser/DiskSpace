@@ -17,16 +17,58 @@ public sealed class FindingDetailPane : ThemedControl
 {
     private const int Pad = 18;
 
+    private const int ActionButtonHeight = 30;
+
+    private readonly AccentButton _actionButton = new();
     private CleanupFinding? _finding;
+    private bool _actionsEnabled = true;
 
     public FindingDetailPane()
     {
         Dock = DockStyle.Fill;
+
+        _actionButton.Kind = ButtonKind.Secondary;
+        _actionButton.Height = ActionButtonHeight;
+        _actionButton.Visible = false;
+        _actionButton.Click += (_, _) =>
+        {
+            if (_finding is { Rule.Action: not null } finding)
+                ActionRequested?.Invoke(this, finding);
+        };
+
+        Controls.Add(_actionButton);
+    }
+
+    /// <summary>
+    /// Raised when the person asks to run the highlighted finding's <see cref="RuleAction"/>.
+    /// The pane only asks; confirming and running it is the page's job.
+    /// </summary>
+    public event EventHandler<CleanupFinding>? ActionRequested;
+
+    /// <summary>Grays the action button out while a scan, a cleanup or another action runs.</summary>
+    [System.ComponentModel.DefaultValue(true)]
+    public bool ActionsEnabled
+    {
+        get => _actionsEnabled;
+        set
+        {
+            _actionsEnabled = value;
+            _actionButton.Enabled = value;
+        }
     }
 
     public void Show(CleanupFinding? finding)
     {
         _finding = finding;
+
+        if (finding?.Rule.Action is { } action)
+        {
+            _actionButton.Text = action.Label;
+            _actionButton.Width = TextRenderer.MeasureText(action.Label, AppTheme.UiFont).Width + 36;
+            _actionButton.Enabled = _actionsEnabled;
+        }
+
+        _actionButton.Visible = finding?.Rule.Action is not null;
         Invalidate();
     }
 
@@ -56,6 +98,9 @@ public sealed class FindingDetailPane : ThemedControl
         y = DrawSection(g, palette, "WHAT THIS IS", _finding.Rule.Description, width, y);
         y = DrawSection(g, palette, "WHAT BREAKS", _finding.Rule.WhatBreaks, width, y, emphasis: true);
 
+        if (_finding.Rule.Action is not null)
+            y = DrawActionSection(g, palette, width, y);
+
         if (_finding.Rule.Cleaner is { } cleaner)
         {
             y = DrawSection(g, palette, "REMOVED BY", cleaner.Description, width, y);
@@ -70,6 +115,30 @@ public sealed class FindingDetailPane : ThemedControl
         }
 
         DrawSection(g, palette, "LOCATION", _finding.Path, width, y, mono: true);
+    }
+
+    /// <summary>
+    /// The heading for the action, with the button placed under it. The button is moved only
+    /// when its slot has changed, so the repaint that a move causes settles after one pass.
+    /// </summary>
+    private int DrawActionSection(Graphics g, Palette palette, int width, int y)
+    {
+        using (var separator = new Pen(palette.Border))
+            g.DrawLine(separator, Pad, y, Pad + width, y);
+
+        y += 12;
+
+        TextRenderer.DrawText(
+            g, "WHAT YOU CAN DO", AppTheme.UiFontSmall,
+            new Rectangle(Pad, y, width, 16), palette.TextFaint, TextFormatFlags.NoPrefix);
+
+        y += 22;
+
+        var slot = new Point(Pad, y);
+        if (_actionButton.Location != slot)
+            _actionButton.Location = slot;
+
+        return y + ActionButtonHeight + 18;
     }
 
     private static int DrawTitle(Graphics g, Palette palette, CleanupFinding finding, int width, int y)

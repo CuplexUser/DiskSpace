@@ -59,6 +59,10 @@ public sealed class DiskCleanupHandler : ISystemCleaner
     /// </summary>
     public async Task<long?> MeasureAsync(CancellationToken cancellationToken = default)
     {
+        // WaitAsync hands back a task that already finished even when the token is cancelled,
+        // so a handler that answers instantly would otherwise hide the cancellation.
+        cancellationToken.ThrowIfCancellationRequested();
+
         var work = RunOnStaThread(() =>
         {
             using var session = Session.Open(_hive, _parentPath, _keyName, _volume);
@@ -84,7 +88,9 @@ public sealed class DiskCleanupHandler : ISystemCleaner
     /// reported while working, or its own measurement from just before when it reported none.
     /// </summary>
     public Task<long> CleanAsync(IProgress<long>? progress = null, CancellationToken cancellationToken = default) =>
-        RunOnStaThread(() =>
+        cancellationToken.IsCancellationRequested
+            ? Task.FromCanceled<long>(cancellationToken)
+            : RunOnStaThread(() =>
         {
             using var session = Session.Open(_hive, _parentPath, _keyName, _volume);
             if (session is null)

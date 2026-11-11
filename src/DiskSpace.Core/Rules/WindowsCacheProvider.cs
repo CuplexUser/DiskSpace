@@ -7,10 +7,8 @@ namespace DiskSpace.Core.Rules;
 /// marked as needing elevation, and the genuinely consequential entries are rated Advanced
 /// rather than Safe.
 ///
-/// Temp directories, Delivery Optimization and the component store are not here on purpose:
-/// Windows has its own handlers for those, which <see cref="DiskCleanupProvider"/> runs. A temp
-/// directory in particular needs a per-file "has anything used this lately" test, and a rule
-/// that can only empty a whole directory cannot make it.
+/// Delivery Optimization and the component store are not here on purpose: Windows has its own
+/// handlers for those, which <see cref="DiskCleanupProvider"/> runs.
 /// </summary>
 public sealed class WindowsCacheProvider : IRuleProvider
 {
@@ -22,6 +20,42 @@ public sealed class WindowsCacheProvider : IRuleProvider
     {
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var userTemp = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar);
+
+        // Temp directories are thinned, never emptied: only what nothing has written for a
+        // day goes. Windows' own handler waits a week, which on a machine in daily use leaves
+        // nearly everything where it is.
+        yield return new CleanupRule
+        {
+            Id = "win.user-temp",
+            Name = "Temporary files (user)",
+            Category = Category,
+            Risk = RiskLevel.Safe,
+            Description =
+                "Files in your temp directory that nothing has written to for more than a day.",
+            WhatBreaks =
+                "Nothing, as long as no installer is waiting on a restart to finish. Newer "
+                + "files are left alone and files still in use are skipped.",
+            Root = userTemp,
+            Targets = [userTemp],
+            MinimumAge = TimeSpan.FromDays(1),
+        };
+
+        yield return new CleanupRule
+        {
+            Id = "win.machine-temp",
+            Name = "Temporary files (system)",
+            Category = Category,
+            Risk = RiskLevel.Safe,
+            Description =
+                "Files in the machine-wide temp directories that nothing has written to for "
+                + "more than a day.",
+            WhatBreaks = "Nothing. Newer files are left alone and files in use are skipped.",
+            Root = windows,
+            Targets = [Path.Combine(windows, "Temp"), Path.Combine(windows, "SystemTemp")],
+            MinimumAge = TimeSpan.FromDays(1),
+            RequiresElevation = true,
+        };
 
         yield return new CleanupRule
         {

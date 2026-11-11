@@ -16,6 +16,9 @@ internal static class Glyphs
     /// <summary>Folder.</summary>
     public const string Folder = "";
 
+    /// <summary>Two overlapping pages, Segoe's "Copy" icon.</summary>
+    public const string Files = "";
+
     /// <summary>Four tiles in a grid, the shape Windows uses for an application.</summary>
     public const string Programs = "";
 

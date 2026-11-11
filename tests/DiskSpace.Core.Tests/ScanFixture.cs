@@ -21,7 +21,7 @@ public sealed class ScanFixture : IDisposable
 
     public string Dir(string relative)
     {
-        var full = Path.Combine(Root, relative);
+        var full = Path.GetFullPath(Path.Combine(Root, relative));
         Directory.CreateDirectory(full);
         return full;
     }
@@ -29,7 +29,8 @@ public sealed class ScanFixture : IDisposable
     /// <summary>Creates a file of exactly <paramref name="bytes"/> length.</summary>
     public string File(string relative, int bytes)
     {
-        var full = Path.Combine(Root, relative);
+        // Normalized so "a/b.bin" comes back spelled the way Windows lists it.
+        var full = Path.GetFullPath(Path.Combine(Root, relative));
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         using var stream = new FileStream(full, FileMode.Create, FileAccess.Write);
         stream.SetLength(bytes);

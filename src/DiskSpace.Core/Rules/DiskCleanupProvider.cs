@@ -38,6 +38,11 @@ public sealed class DiskCleanupProvider : IRuleProvider
         "D3D Shader Cache",
         "Internet Cache Files",
         "Thumbnail Cache",
+
+        // Covered more thoroughly: the temp rules take what has gone unused for a day, where
+        // this handler waits a week. It also sweeps old files out of two Windows log folders,
+        // which is the one thing given up by leaving it out.
+        "Temporary Files",
     };
 
     private sealed record Known(
@@ -106,14 +111,6 @@ public sealed class DiskCleanupProvider : IRuleProvider
             "Update files cached so that this PC can pass them on to others.",
             "Nothing locally; other machines on the network lose a nearby source.",
             @"{windows}\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache"),
-
-        ["Temporary Files"] = new(
-            "Temporary files",
-            RiskLevel.Safe,
-            "Files in your temp directory and the system temp directories, and old Windows log "
-            + "files, that nothing has opened for a week.",
-            "Nothing. Windows only takes files that have gone unused for seven days, so "
-            + "whatever a running program or installer still needs is left alone."),
 
         ["Recycle Bin"] = new(
             "Recycle Bin",

@@ -4,10 +4,10 @@ using DiskSpace.Core.Rules;
 namespace DiskSpace.Core.Quarantine;
 
 /// <summary>
-/// Stages folders so they can be restored, instead of deleting them outright.
+/// Stages folders, and single files, so they can be restored instead of deleting them outright.
 ///
-/// Used only for the orphan detector's findings, where the evidence is circumstantial and the
-/// failure shows up weeks later. Caches are not quarantined: they regenerate, so staging them
+/// Used only for findings that rest on inference, such as the orphan detector's, where the
+/// evidence is circumstantial and the failure shows up weeks later. Caches are not quarantined: they regenerate, so staging them
 /// would go on occupying the space the user is trying to reclaim.
 ///
 /// Folders are packed into a single archive rather than copied file by file. The expense of a
@@ -34,7 +34,7 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
         IProgress<QuarantineProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        if (!Directory.Exists(sourcePath))
+        if (!Directory.Exists(sourcePath) && !File.Exists(sourcePath))
             throw new DirectoryNotFoundException($"Nothing to quarantine at {sourcePath}");
 
         var location = ResolveLocation(sourcePath);
@@ -81,13 +81,18 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
         var id = $"{DateTime.Now:yyyy-MM-dd-HHmmss}-{SafeName(Path.GetFileName(sourcePath))}";
         var archivePath = Path.Combine(location, id + ".zip");
 
-        var files = Directory.GetFiles(sourcePath, "*", new EnumerationOptions
-        {
-            RecurseSubdirectories = true,
-            IgnoreInaccessible = true,
-            // Following a junction would archive data that lives elsewhere and then delete it.
-            AttributesToSkip = FileAttributes.ReparsePoint,
-        });
+        // A single file is archived under its own name, as an archive of one.
+        var isFile = File.Exists(sourcePath);
+
+        var files = isFile
+            ? [sourcePath]
+            : Directory.GetFiles(sourcePath, "*", new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                // Following a junction would archive data that lives elsewhere and then delete it.
+                AttributesToSkip = FileAttributes.ReparsePoint,
+            });
 
         long totalBytes = 0;
         var written = 0;
@@ -104,7 +109,7 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    var relative = Path.GetRelativePath(sourcePath, file);
+                    var relative = isFile ? Path.GetFileName(file) : Path.GetRelativePath(sourcePath, file);
 
                     try
                     {
@@ -133,8 +138,9 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
                 }
 
                 // Empty directories carry intent; a restore should reproduce them.
-                foreach (var directory in Directory.GetDirectories(
-                             sourcePath, "*", SearchOption.AllDirectories))
+                foreach (var directory in isFile
+                             ? []
+                             : Directory.GetDirectories(sourcePath, "*", SearchOption.AllDirectories))
                 {
                     if (Directory.GetFileSystemEntries(directory).Length != 0)
                         continue;
@@ -164,14 +170,31 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
             PurgeAfter = DateTimeOffset.Now + _options.Retention,
             RuleId = rule.Id,
             RuleName = rule.Name,
+            IsFile = isFile,
         };
 
         manifest.Save();
 
         // Only now, with a verified archive and a manifest on disk, does the original go.
-        // SafeDelete rather than Directory.Delete: the folder may contain a junction, whose
-        // target was deliberately not archived and must not be deleted either.
-        Safety.SafeDelete.DeleteDirectory(sourcePath, removeRoot: true, cancellationToken);
+        if (isFile)
+        {
+            Safety.SafeDelete.DeleteFile(sourcePath);
+
+            if (File.Exists(sourcePath))
+            {
+                // Still there, so nothing was reclaimed and there is nothing to restore. An
+                // archive beside a file that never left would only block a later attempt.
+                TryDelete(archivePath);
+                TryDelete(manifest.ManifestPath);
+                throw new IOException($"{sourcePath} is in use and could not be removed.");
+            }
+        }
+        else
+        {
+            // SafeDelete rather than Directory.Delete: the folder may contain a junction, whose
+            // target was deliberately not archived and must not be deleted either.
+            Safety.SafeDelete.DeleteDirectory(sourcePath, removeRoot: true, cancellationToken);
+        }
 
         progress?.Report(new QuarantineProgress(written, files.Length, totalBytes, "Done"));
         return manifest;
@@ -207,10 +230,14 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
 
         Directory.CreateDirectory(root);
         var destination = Path.Combine(root, id);
+        var isFile = File.Exists(sourcePath);
 
-        Directory.Move(sourcePath, destination);
+        if (isFile)
+            File.Move(sourcePath, destination);
+        else
+            Directory.Move(sourcePath, destination);
 
-        var (bytes, files) = Measure(destination);
+        var (bytes, files) = isFile ? (new FileInfo(destination).Length, 1L) : Measure(destination);
 
         var manifest = new QuarantineManifest
         {
@@ -224,6 +251,7 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
             PurgeAfter = DateTimeOffset.Now + _options.Retention,
             RuleId = rule.Id,
             RuleName = rule.Name,
+            IsFile = isFile,
         };
 
         manifest.Save();
@@ -273,13 +301,31 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
         IProgress<QuarantineProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        if (Directory.Exists(manifest.OriginalPath))
+        if (Directory.Exists(manifest.OriginalPath) || File.Exists(manifest.OriginalPath))
             throw new IOException($"{manifest.OriginalPath} already exists.");
 
         if (manifest.MovedToPath is { } moved)
         {
-            Directory.Move(moved, manifest.OriginalPath);
+            if (manifest.IsFile)
+                File.Move(moved, manifest.OriginalPath);
+            else
+                Directory.Move(moved, manifest.OriginalPath);
+
             File.Delete(manifest.ManifestPath);
+            return;
+        }
+
+        if (manifest.IsFile)
+        {
+            await Task.Run(() =>
+            {
+                using var archive = ZipFile.OpenRead(manifest.ArchivePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(manifest.OriginalPath)!);
+                archive.Entries.Single().ExtractToFile(manifest.OriginalPath, overwrite: false);
+            }, cancellationToken).ConfigureAwait(false);
+
+            TryDelete(manifest.ArchivePath);
+            TryDelete(manifest.ManifestPath);
             return;
         }
 
@@ -316,6 +362,14 @@ public sealed class QuarantineStore(QuarantineOptions? options = null)
     /// <summary>Removes a quarantined item permanently.</summary>
     public static void Purge(QuarantineManifest manifest)
     {
+        if (manifest.IsFile && manifest.MovedToPath is { } movedFile && File.Exists(movedFile))
+        {
+            Safety.SafeDelete.DeleteFile(movedFile);
+
+            if (File.Exists(movedFile))
+                throw new IOException($"{movedFile} could not be removed; it is still in use.");
+        }
+
         if (manifest.MovedToPath is { } moved && Directory.Exists(moved))
         {
             // Not Directory.Delete: a moved-aside folder keeps the attributes it arrived with,

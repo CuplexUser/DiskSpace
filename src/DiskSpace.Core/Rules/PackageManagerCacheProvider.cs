@@ -24,15 +24,16 @@ public sealed class PackageManagerCacheProvider : IRuleProvider
             "Downloaded npm packages and their metadata index.",
             "Nothing. The next install re-downloads what it needs, so the first install after "
             + "this is slower.",
-            new PurgeCommand("npm", "cache clean --force"));
+            new PurgeCommand("npm", "cache clean --force --cache {path}"));
 
+        // The id is historical. This folder is pnpm's metadata cache; the package store lives
+        // under %LOCALAPPDATA%\pnpm\store and is deliberately not listed, because projects
+        // hard-link into it. `pnpm store prune` works on that store, not on this folder, so
+        // it is not run on this rule's behalf.
         yield return Cache(
-            "pnpm-store", "pnpm store", Path.Combine(local, "pnpm-cache"),
-            "pnpm's content-addressable package store.",
-            "Existing projects keep working, but pnpm re-fetches packages on the next install. "
-            + "Note that pnpm hard-links from this store, so projects on the same volume may "
-            + "need reinstalling.",
-            new PurgeCommand("pnpm", "store prune"));
+            "pnpm-store", "pnpm metadata cache", Path.Combine(local, "pnpm-cache"),
+            "Package metadata pnpm fetched from the registry.",
+            "Nothing. pnpm fetches the metadata again on the next install.");
 
         yield return Cache(
             "pnpm-state", "pnpm state", Path.Combine(local, "pnpm-state"),
@@ -43,36 +44,38 @@ public sealed class PackageManagerCacheProvider : IRuleProvider
             "yarn", "Yarn cache", Path.Combine(local, "Yarn", "Cache"),
             "Yarn's global package cache.",
             "Nothing. Installs re-download.",
-            new PurgeCommand("yarn", "cache clean"));
+            new PurgeCommand("yarn", "cache clean --cache-folder {path}"));
 
         yield return Cache(
             "pip", "pip cache", Path.Combine(local, "pip", "cache"),
             "Downloaded Python wheels and HTTP responses.",
             "Nothing. pip re-downloads and rebuilds wheels as needed.",
-            new PurgeCommand("pip", "cache purge"));
+            new PurgeCommand("pip", "cache purge --cache-dir {path}"));
 
         yield return Cache(
             "uv", "uv cache", Path.Combine(local, "uv", "cache"),
             "uv's package and wheel cache.",
             "Nothing. uv re-downloads on the next sync.",
-            new PurgeCommand("uv", "cache clean"));
+            new PurgeCommand("uv", "cache clean --cache-dir {path}"));
 
         yield return Cache(
             "nuget", "NuGet packages", Path.Combine(profile, ".nuget", "packages"),
             "Extracted NuGet packages shared by every .NET project on this machine.",
             "Nothing permanent, but every .NET project on this machine restores from here, "
             + "so the next build of each will re-download its dependencies.",
-            new PurgeCommand("dotnet", "nuget locals all --clear"));
+            new PurgeCommand("dotnet", "nuget locals global-packages --clear", "NUGET_PACKAGES"));
 
         yield return Cache(
             "nuget-http", "NuGet HTTP cache", Path.Combine(local, "NuGet", "v3-cache"),
             "Cached NuGet feed responses.",
-            "Nothing. Restores re-query the feed.");
+            "Nothing. Restores re-query the feed.",
+            new PurgeCommand("dotnet", "nuget locals http-cache --clear", "NUGET_HTTP_CACHE_PATH"));
 
         yield return Cache(
             "nuget-plugins", "NuGet plugin cache", Path.Combine(local, "NuGet", "plugins-cache"),
             "Cached NuGet credential-plugin results.",
-            "Nothing; it is rebuilt on demand.");
+            "Nothing; it is rebuilt on demand.",
+            new PurgeCommand("dotnet", "nuget locals plugins-cache --clear", "NUGET_PLUGINS_CACHE_PATH"));
 
         yield return Cache(
             "deno", "Deno cache", Path.Combine(local, "deno"),
@@ -85,10 +88,12 @@ public sealed class PackageManagerCacheProvider : IRuleProvider
             "Nothing. Cargo re-downloads crates on the next build.");
 
         yield return Cache(
-            "go", "Go module cache", Path.Combine(profile, "go", "pkg", "mod", "cache", "download"),
-            "Downloaded Go modules.",
+            // The whole module cache, not only its download folder: that is what Go's own
+            // command clears, and a rule may not list less than its command removes.
+            "go", "Go module cache", Path.Combine(profile, "go", "pkg", "mod"),
+            "Downloaded Go modules and their unpacked sources.",
             "Nothing. Go re-downloads modules on the next build.",
-            new PurgeCommand("go", "clean -modcache"));
+            new PurgeCommand("go", "clean -modcache", "GOMODCACHE"));
 
         yield return Cache(
             "gradle", "Gradle cache", Path.Combine(profile, ".gradle", "caches"),

@@ -105,6 +105,152 @@ public static class SafeDelete
         return reclaimed;
     }
 
+    /// <summary>
+    /// The files under <paramref name="path"/> that nothing has created or written since
+    /// <paramref name="cutoffUtc"/>, judged one file at a time. Junctions are not followed.
+    ///
+    /// Measuring and deleting both go through this, so what a scan offers and what a cleanup
+    /// removes are chosen by the same test.
+    /// </summary>
+    public static IEnumerable<FileInfo> EnumerateOlderThan(
+        string path, DateTime cutoffUtc, CancellationToken cancellationToken = default)
+    {
+        var root = new DirectoryInfo(path);
+        if (!root.Exists || IsReparsePoint(root))
+            yield break;
+
+        var pending = new Stack<DirectoryInfo>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var current = pending.Pop();
+
+            foreach (var file in Listing(current.EnumerateFiles))
+            {
+                if (IsOlderThan(file, cutoffUtc))
+                    yield return file;
+            }
+
+            foreach (var child in Listing(current.EnumerateDirectories))
+            {
+                if (!IsReparsePoint(child))
+                    pending.Push(child);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Deletes the files <see cref="EnumerateOlderThan"/> names, then the directories that
+    /// emptied out and are themselves that old. The root always stays, and so does a young
+    /// empty directory: it may be the working folder something created a moment ago.
+    /// </summary>
+    public static long DeleteOlderThan(
+        string path, DateTime cutoffUtc, CancellationToken cancellationToken = default)
+    {
+        var root = new DirectoryInfo(path);
+        if (!root.Exists || IsReparsePoint(root))
+            return 0;
+
+        long reclaimed = 0;
+
+        foreach (var file in EnumerateOlderThan(path, cutoffUtc, cancellationToken))
+            reclaimed += TryDeleteFile(file);
+
+        // Collected top-down, removed bottom-up.
+        var directories = new List<DirectoryInfo>();
+        var pending = new Stack<DirectoryInfo>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var current = pending.Pop();
+
+            foreach (var child in Listing(current.EnumerateDirectories))
+            {
+                if (IsReparsePoint(child))
+                {
+                    // An old link goes; whatever it points at is left alone.
+                    if (IsOlderThan(child, cutoffUtc))
+                        TryDeleteLink(child);
+
+                    continue;
+                }
+
+                directories.Add(child);
+                pending.Push(child);
+            }
+        }
+
+        for (var i = directories.Count - 1; i >= 0; i--)
+        {
+            var directory = directories[i];
+
+            try
+            {
+                if (IsOlderThan(directory, cutoffUtc) && !directory.EnumerateFileSystemInfos().Any())
+                    directory.Delete();
+            }
+            catch (Exception)
+            {
+                // Something arrived in it, or it is held open. Harmless.
+            }
+        }
+
+        return reclaimed;
+    }
+
+    /// <summary>
+    /// Creation counts as well as the last write: a file copied into place today keeps the
+    /// write time of its source, and it is not old.
+    /// </summary>
+    private static bool IsOlderThan(FileSystemInfo entry, DateTime cutoffUtc)
+    {
+        try
+        {
+            return entry.LastWriteTimeUtc < cutoffUtc && entry.CreationTimeUtc < cutoffUtc;
+        }
+        catch (Exception)
+        {
+            return false; // Cannot tell: treat as recent and leave it.
+        }
+    }
+
+    /// <summary>A directory listing that ends early, instead of throwing, where it cannot be read.</summary>
+    private static IEnumerable<T> Listing<T>(Func<IEnumerable<T>> list)
+    {
+        IEnumerator<T> entries;
+
+        try
+        {
+            entries = list().GetEnumerator();
+        }
+        catch (Exception)
+        {
+            yield break;
+        }
+
+        using (entries)
+        {
+            while (true)
+            {
+                try
+                {
+                    if (!entries.MoveNext())
+                        yield break;
+                }
+                catch (Exception)
+                {
+                    yield break;
+                }
+
+                yield return entries.Current;
+            }
+        }
+    }
+
     public static long DeleteFile(string path)
     {
         var info = new FileInfo(path);
